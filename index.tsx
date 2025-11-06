@@ -263,16 +263,38 @@ const AnalysisPage = ({ requests }) => {
             const labelColWidth = 45;
             const valueColX = margin + labelColWidth;
             const valueColWidth = contentWidth - labelColWidth;
-
+        
             doc.setFont('helvetica', 'bold');
             const labelLines = doc.splitTextToSize(label, labelColWidth - 2);
             doc.text(labelLines, margin, y);
-
+        
             doc.setFont('helvetica', 'normal');
-            const valueLines = doc.splitTextToSize(String(value), valueColWidth);
-            doc.text(valueLines, valueColX, y);
-
-            const lineHeight = 5; 
+            const stringValue = String(value);
+            const valueLines = doc.splitTextToSize(stringValue, valueColWidth);
+            const isURL = (str) => typeof str === 'string' && (str.startsWith('http://') || str.startsWith('https://'));
+            
+            const lineHeight = 5; // The increment used to advance `y`
+            const isLink = isURL(stringValue) && stringValue.trim() !== '-';
+        
+            if (isLink) {
+                // Store original color to reset it later
+                const originalColor = doc.getTextColor();
+                doc.setTextColor(0, 0, 255); // Blue color for links
+                doc.text(valueLines, valueColX, y);
+                doc.setTextColor(originalColor);
+            } else {
+                doc.text(valueLines, valueColX, y);
+            }
+        
+            if (isLink) {
+                // Add the invisible link area over the text.
+                const textMetrics = doc.getTextDimensions('T');
+                const topOfTextBlock = y - textMetrics.h; // Approximate top of the text block
+                const totalTextBlockHeight = valueLines.length * lineHeight; // Total height
+                
+                doc.link(valueColX, topOfTextBlock, valueColWidth, totalTextBlockHeight, { url: stringValue });
+            }
+            
             const lines = Math.max(labelLines.length, valueLines.length);
             y += (lines * lineHeight) + 3;
         };
@@ -736,16 +758,24 @@ const initialFormData = {
     planoComunicacao: [] as any[],
     comunicacaoChecklist: {
         partesEnvolvidasValidaram: '',
+        partesEnvolvidasValidaramJustification: '',
         processoAcompanhamentoComunicado: '',
+        processoAcompanhamentoComunicadoJustification: '',
         comunicacaoEventoRetorno: '',
+        comunicacaoEventoRetornoJustification: '',
         passoAPassoAplicacao: '',
+        passoAPassoAplicacaoJustification: '',
         tabelaContatosPreenchida: '',
+        tabelaContatosPreenchidaJustification: '',
         pontosFocaisInformados: '',
+        pontosFocaisInformadosJustification: '',
     },
     planoRiscos: [] as any[],
     riscosGerais: {
         planoRetornoClaro: '',
+        planoRetornoClaroJustification: '',
         stakeholdersConsultados: '',
+        stakeholdersConsultadosJustification: '',
     },
     cadernoTestes: [] as any[],
     segurancaAcessos: {
@@ -755,12 +785,18 @@ const initialFormData = {
     anexos: [] as Anexo[],
 };
 
+// FIX: Add explicit types for props and make `children` optional to resolve TypeScript errors.
+// This handles cases where the component might be used without children or there are type inference issues.
 // Tooltip Component
-const Tooltip = ({ text, children }) => (
+const Tooltip = ({ text, children }: { text: string; children?: React.ReactNode }) => (
     <div className="tooltip-container">
         {children}
         <span className="tooltip-text">{text}</span>
     </div>
+);
+
+const HelpIcon = () => (
+    <span className="help-icon">?</span>
 );
 
 const ExpandIcon = ({ isExpanded }) => (
@@ -782,6 +818,14 @@ const AlertIcon = () => (
         <line x1="12" y1="17" x2="12.01" y2="17"></line>
     </svg>
 );
+
+const BlockIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+    </svg>
+);
+
 
 const newId = () => `id_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -975,7 +1019,7 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
 
     const validateStep = (stepIndex) => {
         const errors = [];
-        const { informacoesGerais, checklist, checklistSAP, planoImplantacao, mapaTransporte, cadernoTestes, planoComunicacao, planoRetorno, planoRiscos, segurancaAcessos, contatos } = formData;
+        const { informacoesGerais, checklist, checklistSAP, planoImplantacao, mapaTransporte, cadernoTestes, planoComunicacao, planoRetorno, planoRiscos, segurancaAcessos, contatos, comunicacaoChecklist, riscosGerais } = formData;
     
         switch (stepIndex) {
             case 0: // Informações Gerais
@@ -1021,20 +1065,58 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                 // FIX: Add Array.isArray check to safely call forEach.
                 Array.isArray(planoRetorno) && planoRetorno.forEach((row, index) => {
                     if (!row.descricao?.trim()) errors.push({ field: `planoRetorno_${index}_descricao`, message: `A "Descrição" da etapa de retorno #${index + 1} é obrigatória.` });
-                    if (!row.responsavel?.trim()) errors.push({ field: `planoRetorno_${index}_responsavel`, message: `O "Responsável" da etapa de retorno #${index + 1} é obrigatória.` });
+                    if (!row.responsavel?.trim()) errors.push({ field: `planoRetorno_${index}_responsavel`, message: `O "Responsável" da etapa de retorno #${index + 1} é obrigatório.` });
                 });
                 break;
             case 5: // Plano de Comunicação
+                if (!comunicacaoChecklist.partesEnvolvidasValidaram) errors.push({ field: `comunicacaoChecklist_partesEnvolvidasValidaram`, message: `A pergunta 1 do Plano de Comunicação precisa de uma resposta.` });
+                else if ((comunicacaoChecklist.partesEnvolvidasValidaram === 'Não' || comunicacaoChecklist.partesEnvolvidasValidaram === 'N/A') && !comunicacaoChecklist.partesEnvolvidasValidaramJustification?.trim()) {
+                    errors.push({ field: `comunicacaoChecklist_partesEnvolvidasValidaramJustification`, message: `A pergunta 1 do Plano de Comunicação requer uma justificativa.` });
+                }
+
+                if (!comunicacaoChecklist.processoAcompanhamentoComunicado) errors.push({ field: `comunicacaoChecklist_processoAcompanhamentoComunicado`, message: `A pergunta 2 do Plano de Comunicação precisa de uma resposta.` });
+                else if ((comunicacaoChecklist.processoAcompanhamentoComunicado === 'Não' || comunicacaoChecklist.processoAcompanhamentoComunicado === 'N/A') && !comunicacaoChecklist.processoAcompanhamentoComunicadoJustification?.trim()) {
+                    errors.push({ field: `comunicacaoChecklist_processoAcompanhamentoComunicadoJustification`, message: `A pergunta 2 do Plano de Comunicação requer uma justificativa.` });
+                }
+                
+                if (!comunicacaoChecklist.comunicacaoEventoRetorno) errors.push({ field: `comunicacaoChecklist_comunicacaoEventoRetorno`, message: `A pergunta 3 do Plano de Comunicação precisa de uma resposta.` });
+                else if ((comunicacaoChecklist.comunicacaoEventoRetorno === 'Não' || comunicacaoChecklist.comunicacaoEventoRetorno === 'N/A') && !comunicacaoChecklist.comunicacaoEventoRetornoJustification?.trim()) {
+                    errors.push({ field: `comunicacaoChecklist_comunicacaoEventoRetornoJustification`, message: `A pergunta 3 do Plano de Comunicação requer uma justificativa.` });
+                }
+                
+                if (!comunicacaoChecklist.passoAPassoAplicacao) errors.push({ field: `comunicacaoChecklist_passoAPassoAplicacao`, message: `A pergunta 4 do Plano de Comunicação precisa de uma resposta.` });
+                else if ((comunicacaoChecklist.passoAPassoAplicacao === 'Não' || comunicacaoChecklist.passoAPassoAplicacao === 'N/A') && !comunicacaoChecklist.passoAPassoAplicacaoJustification?.trim()) {
+                    errors.push({ field: `comunicacaoChecklist_passoAPassoAplicacaoJustification`, message: `A pergunta 4 do Plano de Comunicação requer uma justificativa.` });
+                }
+                
+                if (!comunicacaoChecklist.tabelaContatosPreenchida) errors.push({ field: `comunicacaoChecklist_tabelaContatosPreenchida`, message: `A pergunta 5 do Plano de Comunicação precisa de uma resposta.` });
+                else if ((comunicacaoChecklist.tabelaContatosPreenchida === 'Não' || comunicacaoChecklist.tabelaContatosPreenchida === 'N/A') && !comunicacaoChecklist.tabelaContatosPreenchidaJustification?.trim()) {
+                    errors.push({ field: `comunicacaoChecklist_tabelaContatosPreenchidaJustification`, message: `A pergunta 5 do Plano de Comunicação requer uma justificativa.` });
+                }
+
+                if (!comunicacaoChecklist.pontosFocaisInformados) errors.push({ field: `comunicacaoChecklist_pontosFocaisInformados`, message: `A pergunta 6 do Plano de Comunicação precisa de uma resposta.` });
+                else if ((comunicacaoChecklist.pontosFocaisInformados === 'Não' || comunicacaoChecklist.pontosFocaisInformados === 'N/A') && !comunicacaoChecklist.pontosFocaisInformadosJustification?.trim()) {
+                    errors.push({ field: `comunicacaoChecklist_pontosFocaisInformadosJustification`, message: `A pergunta 6 do Plano de Comunicação requer uma justificativa.` });
+                }
+
                 if (planoComunicacao.length === 0) { errors.push({ field: 'planoComunicacao_empty', message: 'Adicione pelo menos um item ao "Plano de Comunicação".' }); }
-                // FIX: Add Array.isArray check to safely call forEach.
                 Array.isArray(planoComunicacao) && planoComunicacao.forEach((row, index) => {
                     if (!row.atividade?.trim()) errors.push({ field: `planoComunicacao_${index}_atividade`, message: `A "Atividade/Público" da comunicação #${index + 1} é obrigatória.` });
-                    if (!row.responsavel?.trim()) errors.push({ field: `planoComunicacao_${index}_responsavel`, message: `O "Responsável" da comunicação #${index + 1} é obrigatório.` });
+                    if (!row.responsavel?.trim()) errors.push({ field: `planoComunicacao_${index}_responsavel`, message: `O "Responsável" da comunicação #${index + 1} é obrigatória.` });
                 });
                 break;
             case 6: // Risco de Mudança
+                if (!riscosGerais.planoRetornoClaro) errors.push({ field: `riscosGerais_planoRetornoClaro`, message: `A pergunta 1 de Risco de Mudança precisa de uma resposta.` });
+                else if ((riscosGerais.planoRetornoClaro === 'Não' || riscosGerais.planoRetornoClaro === 'N/A') && !riscosGerais.planoRetornoClaroJustification?.trim()) {
+                    errors.push({ field: `riscosGerais_planoRetornoClaroJustification`, message: `A pergunta 1 de Risco de Mudança requer uma justificativa.` });
+                }
+                
+                if (!riscosGerais.stakeholdersConsultados) errors.push({ field: `riscosGerais_stakeholdersConsultados`, message: `A pergunta 2 de Risco de Mudança precisa de uma resposta.` });
+                else if ((riscosGerais.stakeholdersConsultados === 'Não' || riscosGerais.stakeholdersConsultados === 'N/A') && !riscosGerais.stakeholdersConsultadosJustification?.trim()) {
+                    errors.push({ field: `riscosGerais_stakeholdersConsultadosJustification`, message: `A pergunta 2 de Risco de Mudança requer uma justificativa.` });
+                }
+
                 if (planoRiscos.length === 0) { errors.push({ field: 'planoRiscos_empty', message: 'Adicione pelo menos um risco ao "Risco de Mudança".' }); }
-                // FIX: Add Array.isArray check to safely call forEach.
                 Array.isArray(planoRiscos) && planoRiscos.forEach((row, index) => {
                     if (!row.risco?.trim()) errors.push({ field: `planoRiscos_${index}_risco`, message: `A descrição do "Risco" #${index + 1} é obrigatória.` });
                     if (!row.acao?.trim()) errors.push({ field: `planoRiscos_${index}_acao`, message: `A "Ação" para o risco #${index + 1} é obrigatória.` });
@@ -1365,16 +1447,38 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
             const labelColWidth = 45;
             const valueColX = margin + labelColWidth;
             const valueColWidth = contentWidth - labelColWidth;
-
+        
             doc.setFont('helvetica', 'bold');
             const labelLines = doc.splitTextToSize(label, labelColWidth - 2);
             doc.text(labelLines, margin, y);
-
+        
             doc.setFont('helvetica', 'normal');
-            const valueLines = doc.splitTextToSize(String(value), valueColWidth);
-            doc.text(valueLines, valueColX, y);
-
-            const lineHeight = 5; 
+            const stringValue = String(value);
+            const valueLines = doc.splitTextToSize(stringValue, valueColWidth);
+            const isURL = (str) => typeof str === 'string' && (str.startsWith('http://') || str.startsWith('https://'));
+            
+            const lineHeight = 5; // The increment used to advance `y`
+            const isLink = isURL(stringValue) && stringValue.trim() !== '-';
+        
+            if (isLink) {
+                // Store original color to reset it later
+                const originalColor = doc.getTextColor();
+                doc.setTextColor(0, 0, 255); // Blue color for links
+                doc.text(valueLines, valueColX, y);
+                doc.setTextColor(originalColor);
+            } else {
+                doc.text(valueLines, valueColX, y);
+            }
+        
+            if (isLink) {
+                // Add the invisible link area over the text.
+                const textMetrics = doc.getTextDimensions('T');
+                const topOfTextBlock = y - textMetrics.h; // Approximate top of the text block
+                const totalTextBlockHeight = valueLines.length * lineHeight; // Total height
+                
+                doc.link(valueColX, topOfTextBlock, valueColWidth, totalTextBlockHeight, { url: stringValue });
+            }
+            
             const lines = Math.max(labelLines.length, valueLines.length);
             y += (lines * lineHeight) + 3;
         };
@@ -1691,24 +1795,6 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
             </>
         );
 
-        const ChecklistRadioGroup = ({ options, name, selectedValue, onChange }) => (
-            <div className="checklist-radio-group">
-                {Array.isArray(options) && options.map(option => (
-                    <label key={option.value} className={`checklist-radio-button ${option.className} ${selectedValue === option.value ? 'selected' : ''}`}>
-                        <input
-                            type="radio"
-                            name={name}
-                            value={option.value}
-                            checked={selectedValue === option.value}
-                            onChange={e => onChange(e.target.value)}
-                        />
-                        {option.icon}
-                        <span>{option.label}</span>
-                    </label>
-                ))}
-            </div>
-        );
-
         switch (currentStep) {
             case 0: // Informações Gerais
                 return (
@@ -1716,7 +1802,11 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                         <h3>{steps[0]}</h3>
                         <div className="form-grid">
                              <div className={`form-field full-width card-like-section ${formData.informacoesGerais.referenteSAP === 'Sim' ? 'answered' : ''}`}>
-                                <label className="fieldset-description">A demanda é referente ao SAP?</label>
+                                <label className="fieldset-description">A demanda é referente ao SAP?
+                                    <Tooltip text="Marque 'Sim' se a mudança envolve qualquer alteração, configuração ou transporte de request no ambiente SAP. Isso habilitará etapas adicionais no formulário.">
+                                        <HelpIcon />
+                                    </Tooltip>
+                                </label>
                                 <div className="radio-group">
                                     <label className="radio-label"><input type="radio" name="referenteSAP" value="Sim" checked={formData.informacoesGerais.referenteSAP === 'Sim'} onChange={(e) => handleChange('informacoesGerais', 'referenteSAP', e.target.value)} /> Sim</label>
                                     <label className="radio-label"><input type="radio" name="referenteSAP" value="Não" checked={formData.informacoesGerais.referenteSAP === 'Não'} onChange={(e) => handleChange('informacoesGerais', 'referenteSAP', e.target.value)} /> Não</label>
@@ -1724,7 +1814,11 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                 {formData.informacoesGerais.referenteSAP === 'Sim' && (
                                     <div className="conditional-fields form-grid">
                                         <div className="form-field full-width">
-                                            <label>Frentes SAP</label>
+                                            <label>Frentes SAP
+                                                <Tooltip text="Selecione as frentes SAP impactadas pela mudança. Múltiplas frentes podem ser selecionadas.">
+                                                    <HelpIcon />
+                                                </Tooltip>
+                                            </label>
                                             <MultiSelect
                                                 optionsData={frentesSAPData}
                                                 selected={formData.informacoesGerais.frentesSAP}
@@ -1736,16 +1830,18 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                     </div>
                                 )}
                             </div>
-                            <div className="form-field"><label>Líder da Mudança</label><input type="text" value={formData.informacoesGerais.liderMudanca} onChange={(e) => handleChange('informacoesGerais', 'liderMudanca', e.target.value)} className={isFieldInvalid('informacoesGerais_liderMudanca') ? 'validation-error-field' : ''} /></div>
-                            <div className="form-field"><label>Solicitante</label><input type="text" value={formData.informacoesGerais.solicitante} readOnly className={isFieldInvalid('informacoesGerais_solicitante') ? 'validation-error-field' : ''} /></div>
-                            <div className="form-field"><label>Líder do Produto</label><input type="text" value={formData.informacoesGerais.liderProduto} onChange={(e) => handleChange('informacoesGerais', 'liderProduto', e.target.value)} /></div>
-                            <div className="form-field"><label>Data da Mudança</label><input type="date" value={formData.informacoesGerais.dataMudanca} onChange={(e) => handleChange('informacoesGerais', 'dataMudanca', e.target.value)} className={isFieldInvalid('informacoesGerais_dataMudanca') ? 'validation-error-field' : ''} min={minDate} /></div>
+                            <div className="form-field"><label>Líder da Mudança<Tooltip text="Pessoa responsável por liderar a execução e o sucesso da mudança. Geralmente um coordenador ou gerente técnico."><HelpIcon /></Tooltip></label><input type="text" value={formData.informacoesGerais.liderMudanca} onChange={(e) => handleChange('informacoesGerais', 'liderMudanca', e.target.value)} className={isFieldInvalid('informacoesGerais_liderMudanca') ? 'validation-error-field' : ''} /></div>
+                            <div className="form-field"><label>Solicitante<Tooltip text="Nome do colaborador que está abrindo a requisição de mudança. Este campo é preenchido automaticamente com base no seu login."><HelpIcon /></Tooltip></label><input type="text" value={formData.informacoesGerais.solicitante} readOnly className={isFieldInvalid('informacoesGerais_solicitante') ? 'validation-error-field' : ''} /></div>
+                            <div className="form-field"><label>Líder do Produto<Tooltip text="Product Owner (PO) ou responsável pela área de negócio que validou a necessidade e o escopo da mudança."><HelpIcon /></Tooltip></label><input type="text" value={formData.informacoesGerais.liderProduto} onChange={(e) => handleChange('informacoesGerais', 'liderProduto', e.target.value)} /></div>
+                            <div className="form-field"><label>Data da Mudança<Tooltip text="Data planejada para a execução da mudança em produção. A data deve ser futura."><HelpIcon /></Tooltip></label><input type="date" value={formData.informacoesGerais.dataMudanca} onChange={(e) => handleChange('informacoesGerais', 'dataMudanca', e.target.value)} className={isFieldInvalid('informacoesGerais_dataMudanca') ? 'validation-error-field' : ''} min={minDate} /></div>
 
-                            <div className="form-field full-width"><label>Motivo da Mudança</label><textarea value={formData.informacoesGerais.motivoMudanca} onChange={(e) => handleChange('informacoesGerais', 'motivoMudanca', e.target.value)} className={isFieldInvalid('informacoesGerais_motivoMudanca') ? 'validation-error-field' : ''} /></div>
-                            <div className="form-field full-width"><label>Impacto de Não Realizar</label><textarea value={formData.informacoesGerais.impactoNaoRealizar} onChange={(e) => handleChange('informacoesGerais', 'impactoNaoRealizar', e.target.value)} /></div>
+                            <div className="form-field full-width"><label>Motivo da Mudança<Tooltip text="Descreva de forma clara e objetiva o porquê desta mudança ser necessária. Qual problema ela resolve ou qual benefício ela trará?"><HelpIcon /></Tooltip></label><textarea value={formData.informacoesGerais.motivoMudanca} onChange={(e) => handleChange('informacoesGerais', 'motivoMudanca', e.target.value)} className={isFieldInvalid('informacoesGerais_motivoMudanca') ? 'validation-error-field' : ''} /></div>
+                            <div className="form-field full-width"><label>Impacto de Não Realizar<Tooltip text="Quais são as consequências negativas ou perda de oportunidade se esta mudança não for implementada?"><HelpIcon /></Tooltip></label><textarea value={formData.informacoesGerais.impactoNaoRealizar} onChange={(e) => handleChange('informacoesGerais', 'impactoNaoRealizar', e.target.value)} /></div>
 
-                            <div className="form-field"><label>Classificação</label><select value={formData.informacoesGerais.classificacao} onChange={(e) => handleChange('informacoesGerais', 'classificacao', e.target.value)}><option>Padrão</option><option>Planejada</option><option>Emergencial</option></select></div>
-                            <div className="form-field full-width"><label>Serviços Afetados</label>
+                            <div className="form-field"><label>Classificação<Tooltip text={`PADRÃO: Específica apenas para ações de baixo impacto e atuação limitada e controlada.
+PLANEJADA: Mudança com possibilidade de ser executada em uma janela determinada.
+EMERGENCIAL: Mudança com necessidade de execução imediata.`}><HelpIcon /></Tooltip></label><select value={formData.informacoesGerais.classificacao} onChange={(e) => handleChange('informacoesGerais', 'classificacao', e.target.value)}><option>Padrão</option><option>Planejada</option><option>Emergencial</option></select></div>
+                            <div className="form-field full-width"><label>Serviços Afetados<Tooltip text="Selecione todos os serviços de TI que serão diretamente ou indiretamente impactados pela mudança (ex: E-mail, Acesso VPN, SAP)."><HelpIcon /></Tooltip></label>
                                 <MultiSelect 
                                     optionsData={servicosData}
                                     selected={formData.informacoesGerais.servicosAfetados}
@@ -1754,7 +1850,7 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                     className={isFieldInvalid('informacoesGerais_servicosAfetados') ? 'validation-error-field' : ''}
                                 />
                             </div>
-                            <div className="form-field full-width"><label>Sistemas Afetados</label>
+                            <div className="form-field full-width"><label>Sistemas Afetados<Tooltip text="Selecione todos os sistemas ou aplicações que sofrerão alterações ou poderão ser impactados (ex: Protheus, Salesforce, Active Directory)."><HelpIcon /></Tooltip></label>
                                 <MultiSelect 
                                     optionsData={sistemasAfetadosData}
                                     selected={formData.informacoesGerais.sistemasAfetados}
@@ -1766,7 +1862,7 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                            
                             <div className={`form-field full-width card-like-section ${formData.informacoesGerais.indisponibilidade !== 'Não' ? 'answered' : ''}`}>
                                 <fieldset>
-                                    <legend>Haverá indisponibilidade de sistema?</legend>
+                                    <legend>Haverá indisponibilidade de sistema?<Tooltip text="Informe se a mudança causará alguma interrupção, total ou parcial, nos serviços ou sistemas para os usuários finais."><HelpIcon /></Tooltip></legend>
                                     <div className="radio-group">
                                         <label className="radio-label"><input type="radio" name="indisponibilidade" value="Sim, total" checked={formData.informacoesGerais.indisponibilidade === 'Sim, total'} onChange={(e) => handleChange('informacoesGerais', 'indisponibilidade', e.target.value)} /> Sim, total</label>
                                         <label className="radio-label"><input type="radio" name="indisponibilidade" value="Sim, parcial" checked={formData.informacoesGerais.indisponibilidade === 'Sim, parcial'} onChange={(e) => handleChange('informacoesGerais', 'indisponibilidade', e.target.value)} /> Sim, parcial</label>
@@ -1774,22 +1870,27 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                     </div>
                                     {formData.informacoesGerais.indisponibilidade !== 'Não' && (
                                         <div className="conditional-fields form-grid">
-                                            <div className="form-field"><label>Início da Indisponibilidade</label><input type="datetime-local" value={formData.informacoesGerais.indisponibilidadeInicio} onChange={(e) => handleChange('informacoesGerais', 'indisponibilidadeInicio', e.target.value)} min={minDateTime} /></div>
-                                            <div className="form-field"><label>Fim da Indisponibilidade</label><input type="datetime-local" value={formData.informacoesGerais.indisponibilidadeFim} onChange={(e) => handleChange('informacoesGerais', 'indisponibilidadeFim', e.target.value)} min={formData.informacoesGerais.indisponibilidadeInicio || minDateTime} /></div>
-                                            <div className="form-field full-width"><label>Período Máximo de Interrupção</label><input type="text" value={formData.informacoesGerais.periodoMaximoInterrupcao} onChange={(e) => handleChange('informacoesGerais', 'periodoMaximoInterrupcao', e.target.value)} placeholder="Ex: 4 horas"/></div>
+                                            <div className="form-field"><label>Início da Indisponibilidade<Tooltip text="Data e hora exatas de quando a indisponibilidade começará."><HelpIcon /></Tooltip></label><input type="datetime-local" value={formData.informacoesGerais.indisponibilidadeInicio} onChange={(e) => handleChange('informacoesGerais', 'indisponibilidadeInicio', e.target.value)} min={minDateTime} /></div>
+                                            <div className="form-field"><label>Fim da Indisponibilidade<Tooltip text="Data e hora exatas de quando a indisponibilidade está planejada para terminar."><HelpIcon /></Tooltip></label><input type="datetime-local" value={formData.informacoesGerais.indisponibilidadeFim} onChange={(e) => handleChange('informacoesGerais', 'indisponibilidadeFim', e.target.value)} min={formData.informacoesGerais.indisponibilidadeInicio || minDateTime} /></div>
+                                            <div className="form-field full-width"><label>Período Máximo de Interrupção<Tooltip text="Informe a duração máxima esperada para a interrupção do serviço (ex: 2 horas, 30 minutos)."><HelpIcon /></Tooltip></label><input type="text" value={formData.informacoesGerais.periodoMaximoInterrupcao} onChange={(e) => handleChange('informacoesGerais', 'periodoMaximoInterrupcao', e.target.value)} placeholder="Ex: 4 horas"/></div>
                                         </div>
                                     )}
                                 </fieldset>
                             </div>
 
-                            <div className="form-field full-width"><label>Restrições para a Mudança</label><textarea value={formData.informacoesGerais.restricoesMudanca} onChange={(e) => handleChange('informacoesGerais', 'restricoesMudanca', e.target.value)} /></div>
+                            <div className="form-field full-width"><label>Restrições para a Mudança<Tooltip text="Liste quaisquer pré-requisitos, dependências ou limitações que devem ser consideradas antes ou durante a execução da mudança (ex: horário específico, necessidade de backup)."><HelpIcon /></Tooltip></label><textarea value={formData.informacoesGerais.restricoesMudanca} onChange={(e) => handleChange('informacoesGerais', 'restricoesMudanca', e.target.value)} /></div>
                         </div>
                     </div>
                 );
             case 1: // Plano de Implantação
                 return (
                     <div className="step-content">
-                        <h3>{steps[1]}</h3>
+                        <h3>
+                            {steps[1]}
+                            <Tooltip text="Detalhe cada atividade necessária para implementar a mudança, desde a preparação até a validação pós-implantação. Seja específico sobre o responsável, datas e tempos de execução.">
+                                <HelpIcon />
+                            </Tooltip>
+                        </h3>
                         {isFieldInvalid('planoImplantacao_empty') && <p className="table-error-message">{(validationErrors.find(e => e.field === 'planoImplantacao_empty') as any).message}</p>}
                         
                         <div className="implementation-plan-list">
@@ -1809,11 +1910,11 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                     </div>
                                     <div className="form-grid">
                                         <div className="form-field full-width">
-                                            <label>Nome da Atividade</label>
+                                            <label>Nome da Atividade<Tooltip text="Nome descritivo para a tarefa a ser executada."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.nome || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'nome', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Etapa</label>
+                                            <label>Etapa<Tooltip text="Fase da mudança em que a atividade ocorre (antes, durante ou depois)."><HelpIcon /></Tooltip></label>
                                             <select value={item.etapa || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'etapa', e.target.value)}>
                                                 <option value="Pré Implantação">Pré Implantação</option>
                                                 <option value="Implantação">Implantação</option>
@@ -1821,35 +1922,35 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                             </select>
                                         </div>
                                         <div className="form-field">
-                                            <label>Status</label>
+                                            <label>Status<Tooltip text="Status atual da atividade (ex: Não iniciado, Em andamento, Concluído)."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.status || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'status', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Data Planejada</label>
+                                            <label>Data Planejada<Tooltip text="Data em que a atividade está agendada para ser executada."><HelpIcon /></Tooltip></label>
                                             <input type="date" value={item.dataPlanejada || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'dataPlanejada', e.target.value)} min={minDate} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Hora Planejada</label>
+                                            <label>Hora Planejada<Tooltip text="Horário em que a atividade está agendada para ser executada."><HelpIcon /></Tooltip></label>
                                             <input type="time" value={item.horaPlanejada || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'horaPlanejada', e.target.value)} />
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Descrição</label>
+                                            <label>Descrição<Tooltip text="Detalhes sobre o que precisa ser feito nesta atividade."><HelpIcon /></Tooltip></label>
                                             <textarea value={item.descricao || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'descricao', e.target.value)} className={isFieldInvalid(`planoImplantacao_${index}_descricao`) ? 'validation-error-field' : ''} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Responsável</label>
+                                            <label>Responsável<Tooltip text="Nome da pessoa ou equipe responsável pela execução."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.responsavel || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'responsavel', e.target.value)} className={isFieldInvalid(`planoImplantacao_${index}_responsavel`) ? 'validation-error-field' : ''} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Departamento</label>
+                                            <label>Departamento<Tooltip text="Departamento do responsável."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.departamento || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'departamento', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Item de Configuração</label>
+                                            <label>Item de Configuração<Tooltip text="Ativo ou componente de TI afetado ou utilizado (ex: Servidor X, Sistema Y)."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.itemConfiguracao || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'itemConfiguracao', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Tempo de Execução</label>
+                                            <label>Tempo de Execução<Tooltip text="Duração estimada para completar a atividade (formato HH:MM)."><HelpIcon /></Tooltip></label>
                                             <input type="text" placeholder="Ex: 01:15" value={item.tempoExecucao || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'tempoExecucao', e.target.value)} />
                                         </div>
                                     </div>
@@ -1877,7 +1978,12 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
             case 2: // Mapa de Transporte
                 return (
                     <div className="step-content">
-                        <h3>{steps[2]}</h3>
+                        <h3>
+                            {steps[2]}
+                            <Tooltip text="Liste todas as requests (transportes) SAP que serão importadas para o ambiente de produção. Inclua a sequência correta de importação, o responsável e o objetivo de cada request.">
+                                <HelpIcon />
+                            </Tooltip>
+                        </h3>
                         {isFieldInvalid('mapaTransporte_empty') && <p className="table-error-message">{(validationErrors.find(e => e.field === 'mapaTransporte_empty') as any).message}</p>}
                         
                         <div className="implementation-plan-list">
@@ -1897,15 +2003,15 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                     </div>
                                     <div className="form-grid">
                                         <div className="form-field full-width">
-                                            <label>ID da Request</label>
+                                            <label>ID da Request<Tooltip text="Identificador único da request no sistema SAP (ex: DEVK912345)."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.request || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'request', e.target.value)} className={isFieldInvalid(`mapaTransporte_${index}_request`) ? 'validation-error-field' : ''} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Sequenciamento</label>
+                                            <label>Sequenciamento<Tooltip text="Ordem numérica em que a request deve ser importada."><HelpIcon /></Tooltip></label>
                                             <input type="text" placeholder="Ex: 1" value={item.sequenciamento || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'sequenciamento', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Tipo da Request</label>
+                                            <label>Tipo da Request<Tooltip text="Classificação da request quanto à sua criticidade ou propósito."><HelpIcon /></Tooltip></label>
                                             <select value={item.tipoRequest || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'tipoRequest', e.target.value)}>
                                                 <option value="">Selecione...</option>
                                                 <option value="Normal">Normal</option>
@@ -1914,58 +2020,112 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                             </select>
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Objetivo da Request</label>
+                                            <label>Objetivo da Request<Tooltip text="Breve descrição da finalidade desta request."><HelpIcon /></Tooltip></label>
                                             <textarea value={item.objetivoRequest || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'objetivoRequest', e.target.value)} className={isFieldInvalid(`mapaTransporte_${index}_objetivoRequest`) ? 'validation-error-field' : ''} />
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Descrição Técnica</label>
+                                            <label>Descrição Técnica<Tooltip text="Detalhes técnicos sobre os objetos contidos na request."><HelpIcon /></Tooltip></label>
                                             <textarea value={item.descricaoTecnica || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'descricaoTecnica', e.target.value)} />
                                         </div>
-                                        <div className="form-field">
-                                            <label>Tipo</label>
-                                            <select value={item.tipo || 'Workbench'} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'tipo', e.target.value)}>
-                                                <option value="Workbench">Workbench</option>
-                                                <option value="Customizing">Customizing</option>
-                                            </select>
+                                        <div className="form-field full-width">
+                                            <label>Tipo
+                                                <Tooltip text="Tipo de objeto SAP. A escolha correta ajuda na governança e no sequenciamento.">
+                                                    <HelpIcon />
+                                                </Tooltip>
+                                            </label>
+                                            <div className="radio-group-vertical">
+                                                <label className="radio-label">
+                                                    <input
+                                                        type="radio"
+                                                        name={`mapaTransporte_tipo_${index}`}
+                                                        value="Workbench"
+                                                        checked={item.tipo === 'Workbench'}
+                                                        onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'tipo', e.target.value)}
+                                                    />
+                                                    <span style={{ flexGrow: 1 }}>Workbench</span>
+                                                    <Tooltip text="Alterações em objetos de desenvolvimento (ABAP, classes, funções, relatórios).">
+                                                        <HelpIcon />
+                                                    </Tooltip>
+                                                </label>
+                                                <label className="radio-label">
+                                                    <input
+                                                        type="radio"
+                                                        name={`mapaTransporte_tipo_${index}`}
+                                                        value="Customizing"
+                                                        checked={item.tipo === 'Customizing'}
+                                                        onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'tipo', e.target.value)}
+                                                    />
+                                                    <span style={{ flexGrow: 1 }}>Customizing</span>
+                                                    <Tooltip text="Alterações de configuração de módulos (MM, SD, FI, CO etc.). Dependem do mandante (client-dependent).">
+                                                        <HelpIcon />
+                                                    </Tooltip>
+                                                </label>
+                                                <label className="radio-label">
+                                                    <input
+                                                        type="radio"
+                                                        name={`mapaTransporte_tipo_${index}`}
+                                                        value="Nota SAP"
+                                                        checked={item.tipo === 'Nota SAP'}
+                                                        onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'tipo', e.target.value)}
+                                                    />
+                                                    <span style={{ flexGrow: 1 }}>Nota SAP</span>
+                                                    <Tooltip text="Pacotes oficiais da SAP para correção de falhas, melhorias ou atualização de versão.">
+                                                        <HelpIcon />
+                                                    </Tooltip>
+                                                </label>
+                                                <label className="radio-label">
+                                                    <input
+                                                        type="radio"
+                                                        name={`mapaTransporte_tipo_${index}`}
+                                                        value="TOC"
+                                                        checked={item.tipo === 'TOC'}
+                                                        onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'tipo', e.target.value)}
+                                                    />
+                                                    <span style={{ flexGrow: 1 }}>TOC (Transport of Copies)</span>
+                                                    <Tooltip text="Requests temporários usados para testes em ambientes específicos.">
+                                                        <HelpIcon />
+                                                    </Tooltip>
+                                                </label>
+                                            </div>
                                         </div>
                                         <div className="form-field">
-                                            <label>Número CALM/ Jira</label>
+                                            <label>Número CALM/ Jira<Tooltip text="ID da tarefa ou história no SAP CALM ou Jira associada."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.numeroCALM || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'numeroCALM', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>GO - SIPAL</label>
+                                            <label>GO - SIPAL<Tooltip text="Número do GO (Gerenciamento de Ocorrências) interno da Sipal, se aplicável."><HelpIcon /></Tooltip></label>
                                             <input type="number" value={item.goSipal || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'goSipal', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Status</label>
+                                            <label>Status<Tooltip text="Status atual da request (ex: Liberada para QA, Aprovada para PRD)."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.status || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'status', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Data de Criação</label>
+                                            <label>Data de Criação<Tooltip text="Data em que a request foi criada no ambiente de desenvolvimento."><HelpIcon /></Tooltip></label>
                                             <input type="date" value={item.dataCriacao || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'dataCriacao', e.target.value)} min={minDate} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Responsável pela Criação</label>
+                                            <label>Responsável pela Criação<Tooltip text="Desenvolvedor ou consultor que criou a request."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.responsavelCriacao || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'responsavelCriacao', e.target.value)} className={isFieldInvalid(`mapaTransporte_${index}_responsavelCriacao`) ? 'validation-error-field' : ''} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Responsável pela Importação</label>
+                                            <label>Responsável pela Importação<Tooltip text="Profissional (geralmente Basis) que importará a request em produção."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.responsavelImportacao || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'responsavelImportacao', e.target.value)} className={isFieldInvalid(`mapaTransporte_${index}_responsavelImportacao`) ? 'validation-error-field' : ''} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Solicitante</label>
+                                            <label>Solicitante<Tooltip text="Pessoa que solicitou a criação da request."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.solicitante || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'solicitante', e.target.value)} />
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Evidência de Teste</label>
+                                            <label>Evidência de Teste<Tooltip text="Link para o documento ou local com as evidências de que a request foi testada com sucesso."><HelpIcon /></Tooltip></label>
                                             <input type="url" placeholder="Link para evidência" value={item.evidenciaTeste || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'evidenciaTeste', e.target.value)} />
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Plano de Rollback Vinculado</label>
+                                            <label>Plano de Rollback Vinculado<Tooltip text="Identificação do plano ou request de rollback, se houver um específico para esta."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.planoRollback || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'planoRollback', e.target.value)} />
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Observações</label>
+                                            <label>Observações<Tooltip text="Informações adicionais relevantes sobre a request."><HelpIcon /></Tooltip></label>
                                             <textarea value={item.observacoes || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'observacoes', e.target.value)} />
                                         </div>
                                     </div>
@@ -1994,7 +2154,12 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
             case 3: // Caderno de Testes
                 return (
                     <div className="step-content">
-                        <h3>{steps[3]}</h3>
+                        <h3>
+                            {steps[3]}
+                            <Tooltip text="Documente todos os testes que foram ou serão executados para validar a mudança. Inclua testes unitários, integrados e de regressão, com seus respectivos responsáveis e evidências.">
+                                <HelpIcon />
+                            </Tooltip>
+                        </h3>
                         {isFieldInvalid('cadernoTestes_empty') && <p className="table-error-message">{(validationErrors.find(e => e.field === 'cadernoTestes_empty') as any).message}</p>}
                         
                         <div className="implementation-plan-list">
@@ -2014,11 +2179,11 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                     </div>
                                     <div className="form-grid">
                                         <div className="form-field full-width">
-                                            <label>Nome do Teste</label>
+                                            <label>Nome do Teste<Tooltip text="Título claro e conciso para o cenário de teste."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={test.nome || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'nome', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Plano</label>
+                                            <label>Plano<Tooltip text="Indica se este teste valida a implementação da mudança ou o plano de retorno (rollback)."><HelpIcon /></Tooltip></label>
                                             <select value={test.plano || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'plano', e.target.value)}>
                                                 <option value="">Selecione...</option>
                                                 <option value="implementação">Implementação</option>
@@ -2026,7 +2191,7 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                             </select>
                                         </div>
                                         <div className="form-field">
-                                            <label>Tipo de Teste</label>
+                                            <label>Tipo de Teste<Tooltip text="Categoria do teste (Unitário, Integrado, Regressivo, etc.)."><HelpIcon /></Tooltip></label>
                                             <select value={test.tipoTeste || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'tipoTeste', e.target.value)}>
                                                 <option value="">Selecione...</option>
                                                 <option value="TU">TU - Teste Unitário</option>
@@ -2038,39 +2203,39 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                             </select>
                                         </div>
                                         <div className="form-field">
-                                            <label>Data Planejada</label>
+                                            <label>Data Planejada<Tooltip text="Data agendada para a execução do teste."><HelpIcon /></Tooltip></label>
                                             <input type="date" value={test.dataPlanejada || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'dataPlanejada', e.target.value)} min={minDate} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Hora Planejada</label>
+                                            <label>Hora Planejada<Tooltip text="Hora agendada para a execução do teste."><HelpIcon /></Tooltip></label>
                                             <input type="time" value={test.horaPlanejada || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'horaPlanejada', e.target.value)} />
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Atividade de Teste</label>
+                                            <label>Atividade de Teste<Tooltip text="Descrição passo a passo de como executar o teste e qual o resultado esperado."><HelpIcon /></Tooltip></label>
                                             <textarea value={test.atividade || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'atividade', e.target.value)} className={isFieldInvalid(`cadernoTestes_${index}_atividade`) ? 'validation-error-field' : ''} />
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Link do Teste</label>
+                                            <label>Link do Teste<Tooltip text="URL para a ferramenta de teste, evidência em vídeo ou documento de resultados."><HelpIcon /></Tooltip></label>
                                             <input type="url" placeholder="Cole o link para a evidência do teste" value={test.linkTeste || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'linkTeste', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Predecessora</label>
+                                            <label>Predecessora<Tooltip text="ID de outra atividade ou teste que deve ser concluído antes deste."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={test.predecessora || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'predecessora', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Responsável</label>
+                                            <label>Responsável<Tooltip text="Pessoa ou equipe responsável por executar o teste."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={test.responsavel || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'responsavel', e.target.value)} className={isFieldInvalid(`cadernoTestes_${index}_responsavel`) ? 'validation-error-field' : ''} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Departamento</label>
+                                            <label>Departamento<Tooltip text="Departamento do responsável pelo teste."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={test.departamento || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'departamento', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Item de Configuração</label>
+                                            <label>Item de Configuração<Tooltip text="Sistema, componente ou ativo de TI que será testado."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={test.itemConfiguracao || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'itemConfiguracao', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Tempo de Execução</label>
+                                            <label>Tempo de Execução<Tooltip text="Duração estimada para a execução completa do teste."><HelpIcon /></Tooltip></label>
                                             <input type="text" placeholder="Ex: 02:30" value={test.tempoExecucao || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'tempoExecucao', e.target.value)} />
                                         </div>
                                     </div>
@@ -2099,7 +2264,12 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
             case 4: // Plano de Retorno
                 return (
                     <div className="step-content">
-                        <h3>{steps[4]} (Rollback)</h3>
+                        <h3>
+                            {steps[4]} (Rollback)
+                            <Tooltip text="Descreva o plano de contingência caso a mudança falhe. Detalhe os passos para reverter as alterações e restaurar o ambiente ao estado anterior, minimizando o impacto.">
+                                <HelpIcon />
+                            </Tooltip>
+                        </h3>
                         {isFieldInvalid('planoRetorno_empty') && <p className="table-error-message">{(validationErrors.find(e => e.field === 'planoRetorno_empty') as any).message}</p>}
                         
                         <div className="implementation-plan-list">
@@ -2119,46 +2289,46 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                     </div>
                                     <div className="form-grid">
                                         <div className="form-field">
-                                            <label>Data Planejada</label>
+                                            <label>Data Planejada<Tooltip text="Data prevista para a execução desta etapa de retorno, se necessária."><HelpIcon /></Tooltip></label>
                                             <input type="date" value={item.dataPlanejada || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'dataPlanejada', e.target.value)} min={minDate} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Hora Planejada</label>
+                                            <label>Hora Planejada<Tooltip text="Hora prevista para a execução desta etapa de retorno."><HelpIcon /></Tooltip></label>
                                             <input type="time" value={item.horaPlanejada || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'horaPlanejada', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Status</label>
+                                            <label>Status<Tooltip text="Status da atividade de retorno (ex: Não iniciado, Concluído)."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.status || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'status', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Data Realizada</label>
+                                            <label>Data Realizada<Tooltip text="Data em que a etapa foi efetivamente executada (preencher se o rollback for acionado)."><HelpIcon /></Tooltip></label>
                                             <input type="date" value={item.dataRealizada || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'dataRealizada', e.target.value)} min={minDate} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Hora Realizada</label>
+                                            <label>Hora Realizada<Tooltip text="Hora em que a etapa foi efetivamente executada."><HelpIcon /></Tooltip></label>
                                             <input type="time" value={item.horaRealizada || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'horaRealizada', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Tipo</label>
+                                            <label>Tipo<Tooltip text="Natureza da etapa de rollback (Técnica: envolve sistemas; Operacional: envolve processos manuais)."><HelpIcon /></Tooltip></label>
                                             <select value={item.tipo || 'Técnico'} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'tipo', e.target.value)}>
                                                 <option value="Técnico">Técnico</option>
                                                 <option value="Operacional">Operacional</option>
                                             </select>
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Descrição</label>
+                                            <label>Descrição<Tooltip text="Detalhes sobre a ação a ser executada para reverter parte da mudança."><HelpIcon /></Tooltip></label>
                                             <textarea value={item.descricao || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'descricao', e.target.value)} className={isFieldInvalid(`planoRetorno_${index}_descricao`) ? 'validation-error-field' : ''} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Predecessora</label>
+                                            <label>Predecessora<Tooltip text="ID de outra etapa de retorno que deve ser concluída antes desta."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.predecessora || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'predecessora', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Responsável</label>
+                                            <label>Responsável<Tooltip text="Pessoa ou equipe encarregada de executar esta etapa do rollback."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.responsavel || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'responsavel', e.target.value)} className={isFieldInvalid(`planoRetorno_${index}_responsavel`) ? 'validation-error-field' : ''} />
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Observação</label>
+                                            <label>Observação<Tooltip text="Qualquer informação adicional importante sobre esta etapa."><HelpIcon /></Tooltip></label>
                                             <textarea value={item.observacao || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'observacao', e.target.value)} />
                                         </div>
                                     </div>
@@ -2187,103 +2357,138 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                     <div className="step-content">
                         <h3>{steps[5]}</h3>
 
-                        <div className="card-like-section">
-                            <label className="fieldset-description">
-                                1) Todas as partes envolvidas validaram o plano de implantação?
-                            </label>
-                            <ChecklistRadioGroup
-                                name="partesEnvolvidasValidaram"
-                                selectedValue={formData.comunicacaoChecklist.partesEnvolvidasValidaram}
-                                onChange={(value) => handleChange('comunicacaoChecklist', 'partesEnvolvidasValidaram', value)}
-                                options={[
-                                    { value: 'Sim', label: 'Sim', className: 'sim', icon: <CheckIcon/> },
-                                    { value: 'Não', label: 'Não', className: 'nao', icon: <AlertIcon/> },
-                                    { value: 'N/A', label: 'N/A', className: 'na', icon: '🚫' },
-                                ]}
-                            />
+                        <div className="checklist-question-container">
+                            <p className="checklist-question-text">1) Todas as partes envolvidas validaram o plano de implantação?</p>
+                            <div className="checklist-answer-buttons">
+                                <button type="button" className={`checklist-answer-btn sim ${formData.comunicacaoChecklist.partesEnvolvidasValidaram === 'Sim' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'partesEnvolvidasValidaram', 'Sim')}><CheckIcon /> Sim</button>
+                                <button type="button" className={`checklist-answer-btn nao ${formData.comunicacaoChecklist.partesEnvolvidasValidaram === 'Não' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'partesEnvolvidasValidaram', 'Não')}><AlertIcon /> Não</button>
+                                <button type="button" className={`checklist-answer-btn na ${formData.comunicacaoChecklist.partesEnvolvidasValidaram === 'N/A' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'partesEnvolvidasValidaram', 'N/A')}><BlockIcon /> N/A</button>
+                            </div>
+                            {(formData.comunicacaoChecklist.partesEnvolvidasValidaram === 'Não' || formData.comunicacaoChecklist.partesEnvolvidasValidaram === 'N/A') && (
+                                <div className="conditional-fields" style={{paddingTop: '1rem', marginTop: '1rem'}}>
+                                    <div className="form-field">
+                                        <label>Justificativa / Plano de Ação</label>
+                                        <textarea
+                                            value={formData.comunicacaoChecklist.partesEnvolvidasValidaramJustification}
+                                            onChange={e => handleChange('comunicacaoChecklist', 'partesEnvolvidasValidaramJustification', e.target.value)}
+                                            className={isFieldInvalid(`comunicacaoChecklist_partesEnvolvidasValidaramJustification`) ? 'validation-error-field' : ''}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="checklist-question-container">
+                            <p className="checklist-question-text">2) O processo de acompanhamento após implantação da solução foi comunicado para a equipe de sustentação?</p>
+                             <div className="checklist-answer-buttons">
+                                <button type="button" className={`checklist-answer-btn sim ${formData.comunicacaoChecklist.processoAcompanhamentoComunicado === 'Sim' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'processoAcompanhamentoComunicado', 'Sim')}><CheckIcon /> Sim</button>
+                                <button type="button" className={`checklist-answer-btn nao ${formData.comunicacaoChecklist.processoAcompanhamentoComunicado === 'Não' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'processoAcompanhamentoComunicado', 'Não')}><AlertIcon /> Não</button>
+                                <button type="button" className={`checklist-answer-btn na ${formData.comunicacaoChecklist.processoAcompanhamentoComunicado === 'N/A' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'processoAcompanhamentoComunicado', 'N/A')}><BlockIcon /> N/A</button>
+                            </div>
+                             {(formData.comunicacaoChecklist.processoAcompanhamentoComunicado === 'Não' || formData.comunicacaoChecklist.processoAcompanhamentoComunicado === 'N/A') && (
+                                <div className="conditional-fields" style={{paddingTop: '1rem', marginTop: '1rem'}}>
+                                    <div className="form-field">
+                                        <label>Justificativa / Plano de Ação</label>
+                                        <textarea
+                                            value={formData.comunicacaoChecklist.processoAcompanhamentoComunicadoJustification}
+                                            onChange={e => handleChange('comunicacaoChecklist', 'processoAcompanhamentoComunicadoJustification', e.target.value)}
+                                            className={isFieldInvalid(`comunicacaoChecklist_processoAcompanhamentoComunicadoJustification`) ? 'validation-error-field' : ''}
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </div>
                         
-                        <div className="card-like-section">
-                            <label className="fieldset-description">
-                                2) O processo de acompanhamento após implantação da solução foi comunicado para a equipe de sustentação?
-                            </label>
-                            <ChecklistRadioGroup
-                                name="processoAcompanhamentoComunicado"
-                                selectedValue={formData.comunicacaoChecklist.processoAcompanhamentoComunicado}
-                                onChange={(value) => handleChange('comunicacaoChecklist', 'processoAcompanhamentoComunicado', value)}
-                                options={[
-                                    { value: 'Sim', label: 'Sim', className: 'sim', icon: <CheckIcon/> },
-                                    { value: 'Não', label: 'Não', className: 'nao', icon: <AlertIcon/> },
-                                    { value: 'N/A', label: 'N/A', className: 'na', icon: '🚫' },
-                                ]}
-                            />
+                        <div className="checklist-question-container">
+                            <p className="checklist-question-text">3) O plano de comunicação contempla comunicação antes e após evento de retorno do ambiente?</p>
+                            <div className="checklist-answer-buttons">
+                                <button type="button" className={`checklist-answer-btn sim ${formData.comunicacaoChecklist.comunicacaoEventoRetorno === 'Sim' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'comunicacaoEventoRetorno', 'Sim')}><CheckIcon /> Sim</button>
+                                <button type="button" className={`checklist-answer-btn nao ${formData.comunicacaoChecklist.comunicacaoEventoRetorno === 'Não' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'comunicacaoEventoRetorno', 'Não')}><AlertIcon /> Não</button>
+                                <button type="button" className={`checklist-answer-btn na ${formData.comunicacaoChecklist.comunicacaoEventoRetorno === 'N/A' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'comunicacaoEventoRetorno', 'N/A')}><BlockIcon /> N/A</button>
+                            </div>
+                            {(formData.comunicacaoChecklist.comunicacaoEventoRetorno === 'Não' || formData.comunicacaoChecklist.comunicacaoEventoRetorno === 'N/A') && (
+                                <div className="conditional-fields" style={{paddingTop: '1rem', marginTop: '1rem'}}>
+                                    <div className="form-field">
+                                        <label>Justificativa / Plano de Ação</label>
+                                        <textarea
+                                            value={formData.comunicacaoChecklist.comunicacaoEventoRetornoJustification}
+                                            onChange={e => handleChange('comunicacaoChecklist', 'comunicacaoEventoRetornoJustification', e.target.value)}
+                                            className={isFieldInvalid(`comunicacaoChecklist_comunicacaoEventoRetornoJustification`) ? 'validation-error-field' : ''}
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
-                        <div className="card-like-section">
-                            <label className="fieldset-description">
-                                3) O plano de comunicação contempla comunicação antes e após evento de retorno do ambiente?
-                            </label>
-                            <ChecklistRadioGroup
-                                name="comunicacaoEventoRetorno"
-                                selectedValue={formData.comunicacaoChecklist.comunicacaoEventoRetorno}
-                                onChange={(value) => handleChange('comunicacaoChecklist', 'comunicacaoEventoRetorno', value)}
-                                options={[
-                                    { value: 'Sim', label: 'Sim', className: 'sim', icon: <CheckIcon/> },
-                                    { value: 'Não', label: 'Não', className: 'nao', icon: <AlertIcon/> },
-                                    { value: 'N/A', label: 'N/A', className: 'na', icon: '🚫' },
-                                ]}
-                            />
+                        <div className="checklist-question-container">
+                            <p className="checklist-question-text">4) Existe no plano de implantação um passo a passo para aplicação de versão do software?</p>
+                            <div className="checklist-answer-buttons">
+                                <button type="button" className={`checklist-answer-btn sim ${formData.comunicacaoChecklist.passoAPassoAplicacao === 'Sim' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'passoAPassoAplicacao', 'Sim')}><CheckIcon /> Sim</button>
+                                <button type="button" className={`checklist-answer-btn nao ${formData.comunicacaoChecklist.passoAPassoAplicacao === 'Não' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'passoAPassoAplicacao', 'Não')}><AlertIcon /> Não</button>
+                                <button type="button" className={`checklist-answer-btn na ${formData.comunicacaoChecklist.passoAPassoAplicacao === 'N/A' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'passoAPassoAplicacao', 'N/A')}><BlockIcon /> N/A</button>
+                            </div>
+                             {(formData.comunicacaoChecklist.passoAPassoAplicacao === 'Não' || formData.comunicacaoChecklist.passoAPassoAplicacao === 'N/A') && (
+                                <div className="conditional-fields" style={{paddingTop: '1rem', marginTop: '1rem'}}>
+                                    <div className="form-field">
+                                        <label>Justificativa / Plano de Ação</label>
+                                        <textarea
+                                            value={formData.comunicacaoChecklist.passoAPassoAplicacaoJustification}
+                                            onChange={e => handleChange('comunicacaoChecklist', 'passoAPassoAplicacaoJustification', e.target.value)}
+                                            className={isFieldInvalid(`comunicacaoChecklist_passoAPassoAplicacaoJustification`) ? 'validation-error-field' : ''}
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
-                        <div className="card-like-section">
-                            <label className="fieldset-description">
-                                4) Existe no plano de implantação um passo a passo para aplicação de versão do software?
-                            </label>
-                            <ChecklistRadioGroup
-                                name="passoAPassoAplicacao"
-                                selectedValue={formData.comunicacaoChecklist.passoAPassoAplicacao}
-                                onChange={(value) => handleChange('comunicacaoChecklist', 'passoAPassoAplicacao', value)}
-                                options={[
-                                    { value: 'Sim', label: 'Sim', className: 'sim', icon: <CheckIcon/> },
-                                    { value: 'Não', label: 'Não', className: 'nao', icon: <AlertIcon/> },
-                                    { value: 'N/A', label: 'N/A', className: 'na', icon: '🚫' },
-                                ]}
-                            />
-                        </div>
-
-                        <div className="card-like-section">
-                            <label className="fieldset-description">
-                                5) A tabela de contatos com matriz de escalonamento foi preenchida?
-                            </label>
-                            <ChecklistRadioGroup
-                                name="tabelaContatosPreenchida"
-                                selectedValue={formData.comunicacaoChecklist.tabelaContatosPreenchida}
-                                onChange={(value) => handleChange('comunicacaoChecklist', 'tabelaContatosPreenchida', value)}
-                                options={[
-                                    { value: 'Sim', label: 'Sim', className: 'sim', icon: <CheckIcon/> },
-                                    { value: 'Não', label: 'Não', className: 'nao', icon: <AlertIcon/> },
-                                    { value: 'N/A', label: 'N/A', className: 'na', icon: '🚫' },
-                                ]}
-                            />
-                        </div>
-
-                        <div className="card-like-section" style={{ marginBottom: '2rem' }}>
-                            <label className="fieldset-description">
-                                6) Os pontos focais e Key Users foram informados sobre os detalhes da mudança incluindo etapas que deverão participar?
-                            </label>
-                            <ChecklistRadioGroup
-                                name="pontosFocaisInformados"
-                                selectedValue={formData.comunicacaoChecklist.pontosFocaisInformados}
-                                onChange={(value) => handleChange('comunicacaoChecklist', 'pontosFocaisInformados', value)}
-                                options={[
-                                    { value: 'Sim', label: 'Sim', className: 'sim', icon: <CheckIcon/> },
-                                    { value: 'Não', label: 'Não', className: 'nao', icon: <AlertIcon/> },
-                                    { value: 'N/A', label: 'N/A', className: 'na', icon: '🚫' },
-                                ]}
-                            />
+                        <div className="checklist-question-container">
+                             <p className="checklist-question-text">5) A tabela de contatos com matriz de escalonamento foi preenchida?</p>
+                            <div className="checklist-answer-buttons">
+                                <button type="button" className={`checklist-answer-btn sim ${formData.comunicacaoChecklist.tabelaContatosPreenchida === 'Sim' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'tabelaContatosPreenchida', 'Sim')}><CheckIcon /> Sim</button>
+                                <button type="button" className={`checklist-answer-btn nao ${formData.comunicacaoChecklist.tabelaContatosPreenchida === 'Não' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'tabelaContatosPreenchida', 'Não')}><AlertIcon /> Não</button>
+                                <button type="button" className={`checklist-answer-btn na ${formData.comunicacaoChecklist.tabelaContatosPreenchida === 'N/A' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'tabelaContatosPreenchida', 'N/A')}><BlockIcon /> N/A</button>
+                            </div>
+                            {(formData.comunicacaoChecklist.tabelaContatosPreenchida === 'Não' || formData.comunicacaoChecklist.tabelaContatosPreenchida === 'N/A') && (
+                                <div className="conditional-fields" style={{paddingTop: '1rem', marginTop: '1rem'}}>
+                                    <div className="form-field">
+                                        <label>Justificativa / Plano de Ação</label>
+                                        <textarea
+                                            value={formData.comunicacaoChecklist.tabelaContatosPreenchidaJustification}
+                                            onChange={e => handleChange('comunicacaoChecklist', 'tabelaContatosPreenchidaJustification', e.target.value)}
+                                            className={isFieldInvalid(`comunicacaoChecklist_tabelaContatosPreenchidaJustification`) ? 'validation-error-field' : ''}
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </div>
                         
-                        <h3 style={{ borderTop: '1px solid var(--sipal-gray)', paddingTop: '2rem' }}>Detalhamento da Comunicação</h3>
+                        <div className="checklist-question-container" style={{ marginBottom: '2rem' }}>
+                            <p className="checklist-question-text">6) Os pontos focais e Key Users foram informados sobre os detalhes da mudança incluindo etapas que deverão participar?</p>
+                             <div className="checklist-answer-buttons">
+                                <button type="button" className={`checklist-answer-btn sim ${formData.comunicacaoChecklist.pontosFocaisInformados === 'Sim' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'pontosFocaisInformados', 'Sim')}><CheckIcon /> Sim</button>
+                                <button type="button" className={`checklist-answer-btn nao ${formData.comunicacaoChecklist.pontosFocaisInformados === 'Não' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'pontosFocaisInformados', 'Não')}><AlertIcon /> Não</button>
+                                <button type="button" className={`checklist-answer-btn na ${formData.comunicacaoChecklist.pontosFocaisInformados === 'N/A' ? 'selected' : ''}`} onClick={() => handleChange('comunicacaoChecklist', 'pontosFocaisInformados', 'N/A')}><BlockIcon /> N/A</button>
+                            </div>
+                            {(formData.comunicacaoChecklist.pontosFocaisInformados === 'Não' || formData.comunicacaoChecklist.pontosFocaisInformados === 'N/A') && (
+                                <div className="conditional-fields" style={{paddingTop: '1rem', marginTop: '1rem'}}>
+                                    <div className="form-field">
+                                        <label>Justificativa / Plano de Ação</label>
+                                        <textarea
+                                            value={formData.comunicacaoChecklist.pontosFocaisInformadosJustification}
+                                            onChange={e => handleChange('comunicacaoChecklist', 'pontosFocaisInformadosJustification', e.target.value)}
+                                            className={isFieldInvalid(`comunicacaoChecklist_pontosFocaisInformadosJustification`) ? 'validation-error-field' : ''}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        
+                        <h3 style={{ borderTop: '1px solid var(--sipal-gray)', paddingTop: '2rem' }}>
+                            Detalhamento da Comunicação
+                            <Tooltip text="Liste todas as comunicações planejadas antes, durante e após a mudança. Especifique o público, o meio e o responsável por cada comunicação.">
+                                <HelpIcon />
+                            </Tooltip>
+                        </h3>
                         {isFieldInvalid('planoComunicacao_empty') && <p className="table-error-message">{(validationErrors.find(e => e.field === 'planoComunicacao_empty') as any).message}</p>}
                         
                         <div className="implementation-plan-list">
@@ -2303,19 +2508,19 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                     </div>
                                     <div className="form-grid">
                                         <div className="form-field">
-                                            <label>Data</label>
+                                            <label>Data<Tooltip text="Data agendada para o envio da comunicação."><HelpIcon /></Tooltip></label>
                                             <input type="date" value={item.data || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'data', e.target.value)} min={minDate} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Hora</label>
+                                            <label>Hora<Tooltip text="Hora agendada para o envio da comunicação."><HelpIcon /></Tooltip></label>
                                             <input type="time" value={item.hora || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'hora', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Status</label>
+                                            <label>Status<Tooltip text="Status atual da comunicação (ex: A enviar, Enviada)."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.status || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'status', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Meio</label>
+                                            <label>Meio<Tooltip text="Canal que será utilizado para a comunicação (E-mail, WhatsApp, etc.)."><HelpIcon /></Tooltip></label>
                                             <select value={item.meio || 'E-mail'} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'meio', e.target.value)}>
                                                 <option value="E-mail">E-mail</option>
                                                 <option value="WhatsApp">WhatsApp</option>
@@ -2325,19 +2530,19 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                             </select>
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Atividade/Público</label>
+                                            <label>Atividade/Público<Tooltip text="Descreva a comunicação a ser feita e para quem ela se destina (ex: 'Comunicado de indisponibilidade para todos os usuários')."><HelpIcon /></Tooltip></label>
                                             <textarea value={item.atividade || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'atividade', e.target.value)} className={isFieldInvalid(`planoComunicacao_${index}_atividade`) ? 'validation-error-field' : ''} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Responsável</label>
+                                            <label>Responsável<Tooltip text="Pessoa responsável por enviar a comunicação."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.responsavel || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'responsavel', e.target.value)} className={isFieldInvalid(`planoComunicacao_${index}_responsavel`) ? 'validation-error-field' : ''} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Contato de Escalonamento</label>
+                                            <label>Contato de Escalonamento<Tooltip text="Pessoa a ser contatada caso haja problemas com esta comunicação."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={item.contatoEscalonamento || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'contatoEscalonamento', e.target.value)} />
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Observação</label>
+                                            <label>Observação<Tooltip text="Informações adicionais relevantes."><HelpIcon /></Tooltip></label>
                                             <textarea value={item.observacao || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'observacao', e.target.value)} />
                                         </div>
                                     </div>
@@ -2366,39 +2571,55 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                     <div className="step-content">
                         <h3>{steps[6]}</h3>
 
-                        <div className="card-like-section">
-                            <label className="fieldset-description">
-                                1) O plano de implantação explica de forma clara como identificar riscos e qual o gatilho para inicio do plano de retorno?
-                            </label>
-                            <ChecklistRadioGroup
-                                name="planoRetornoClaro"
-                                selectedValue={formData.riscosGerais.planoRetornoClaro}
-                                onChange={(value) => handleChange('riscosGerais', 'planoRetornoClaro', value)}
-                                options={[
-                                    { value: 'Sim', label: 'Sim', className: 'sim', icon: <CheckIcon/> },
-                                    { value: 'Não', label: 'Não', className: 'nao', icon: <AlertIcon/> },
-                                    { value: 'N/A', label: 'N/A', className: 'na', icon: '🚫' },
-                                ]}
-                            />
+                         <div className="checklist-question-container">
+                            <p className="checklist-question-text">1) O plano de implantação explica de forma clara como identificar riscos e qual o gatilho para inicio do plano de retorno?</p>
+                             <div className="checklist-answer-buttons">
+                                <button type="button" className={`checklist-answer-btn sim ${formData.riscosGerais.planoRetornoClaro === 'Sim' ? 'selected' : ''}`} onClick={() => handleChange('riscosGerais', 'planoRetornoClaro', 'Sim')}><CheckIcon /> Sim</button>
+                                <button type="button" className={`checklist-answer-btn nao ${formData.riscosGerais.planoRetornoClaro === 'Não' ? 'selected' : ''}`} onClick={() => handleChange('riscosGerais', 'planoRetornoClaro', 'Não')}><AlertIcon /> Não</button>
+                                <button type="button" className={`checklist-answer-btn na ${formData.riscosGerais.planoRetornoClaro === 'N/A' ? 'selected' : ''}`} onClick={() => handleChange('riscosGerais', 'planoRetornoClaro', 'N/A')}><BlockIcon /> N/A</button>
+                            </div>
+                            {(formData.riscosGerais.planoRetornoClaro === 'Não' || formData.riscosGerais.planoRetornoClaro === 'N/A') && (
+                                <div className="conditional-fields" style={{paddingTop: '1rem', marginTop: '1rem'}}>
+                                    <div className="form-field">
+                                        <label>Justificativa / Plano de Ação</label>
+                                        <textarea
+                                            value={formData.riscosGerais.planoRetornoClaroJustification}
+                                            onChange={e => handleChange('riscosGerais', 'planoRetornoClaroJustification', e.target.value)}
+                                            className={isFieldInvalid(`riscosGerais_planoRetornoClaroJustification`) ? 'validation-error-field' : ''}
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
-                        <div className="card-like-section" style={{ marginTop: '1.5rem', marginBottom: '2rem' }}>
-                            <label className="fieldset-description">
-                                2) Todos os stakeholders relevantes foram consultados sobre os riscos e impactos?
-                            </label>
-                            <ChecklistRadioGroup
-                                name="stakeholdersConsultados"
-                                selectedValue={formData.riscosGerais.stakeholdersConsultados}
-                                onChange={(value) => handleChange('riscosGerais', 'stakeholdersConsultados', value)}
-                                options={[
-                                    { value: 'Sim', label: 'Sim', className: 'sim', icon: <CheckIcon/> },
-                                    { value: 'Não', label: 'Não', className: 'nao', icon: <AlertIcon/> },
-                                    { value: 'N/A', label: 'N/A', className: 'na', icon: '🚫' },
-                                ]}
-                            />
+                        <div className="checklist-question-container" style={{ marginBottom: '2rem' }}>
+                            <p className="checklist-question-text">2) Todos os stakeholders relevantes foram consultados sobre os riscos e impactos?</p>
+                             <div className="checklist-answer-buttons">
+                                <button type="button" className={`checklist-answer-btn sim ${formData.riscosGerais.stakeholdersConsultados === 'Sim' ? 'selected' : ''}`} onClick={() => handleChange('riscosGerais', 'stakeholdersConsultados', 'Sim')}><CheckIcon /> Sim</button>
+                                <button type="button" className={`checklist-answer-btn nao ${formData.riscosGerais.stakeholdersConsultados === 'Não' ? 'selected' : ''}`} onClick={() => handleChange('riscosGerais', 'stakeholdersConsultados', 'Não')}><AlertIcon /> Não</button>
+                                <button type="button" className={`checklist-answer-btn na ${formData.riscosGerais.stakeholdersConsultados === 'N/A' ? 'selected' : ''}`} onClick={() => handleChange('riscosGerais', 'stakeholdersConsultados', 'N/A')}><BlockIcon /> N/A</button>
+                            </div>
+                             {(formData.riscosGerais.stakeholdersConsultados === 'Não' || formData.riscosGerais.stakeholdersConsultados === 'N/A') && (
+                                <div className="conditional-fields" style={{paddingTop: '1rem', marginTop: '1rem'}}>
+                                    <div className="form-field">
+                                        <label>Justificativa / Plano de Ação</label>
+                                        <textarea
+                                            value={formData.riscosGerais.stakeholdersConsultadosJustification}
+                                            onChange={e => handleChange('riscosGerais', 'stakeholdersConsultadosJustification', e.target.value)}
+                                            className={isFieldInvalid(`riscosGerais_stakeholdersConsultadosJustification`) ? 'validation-error-field' : ''}
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
-                        <h3 style={{ borderTop: '1px solid var(--sipal-gray)', paddingTop: '2rem' }}>Detalhamento dos Riscos</h3>
+
+                        <h3 style={{ borderTop: '1px solid var(--sipal-gray)', paddingTop: '2rem' }}>
+                            Detalhamento dos Riscos
+                            <Tooltip text="Identifique e avalie os riscos potenciais associados a esta mudança. Para cada risco, defina uma estratégia e ações concretas de mitigação.">
+                                <HelpIcon />
+                            </Tooltip>
+                        </h3>
                         {isFieldInvalid('planoRiscos_empty') && <p className="table-error-message">{(validationErrors.find(e => e.field === 'planoRiscos_empty') as any).message}</p>}
                         
                         <div className="implementation-plan-list">
@@ -2421,14 +2642,14 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                             <input type="text" value={index + 1} readOnly disabled className="read-only-id-field" />
                                         </div>
                                         <div className="form-field">
-                                            <label>Tipo Risco</label>
+                                            <label>Tipo Risco<Tooltip text="Classifique se o evento incerto é uma 'Ameaça' (impacto negativo) ou uma 'Oportunidade' (impacto positivo)."><HelpIcon /></Tooltip></label>
                                             <select value={item.tipoRisco || 'Ameaça'} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'tipoRisco', e.target.value)}>
                                                 <option value="Ameaça">Ameaça</option>
                                                 <option value="Oportunidade">Oportunidade</option>
                                             </select>
                                         </div>
                                         <div className="form-field">
-                                            <label>Estratégia</label>
+                                            <label>Estratégia<Tooltip text="Como a equipe irá lidar com o risco? 'Aceitar', 'Mitigar' (reduzir impacto/probabilidade), 'Transferir' (passar para terceiros) ou 'Evitar' (mudar o plano para eliminar o risco)."><HelpIcon /></Tooltip></label>
                                             <select value={item.estrategia || 'Mitigar'} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'estrategia', e.target.value)}>
                                                 <option value="Aceitar">Aceitar</option>
                                                 <option value="Mitigar">Mitigar</option>
@@ -2437,7 +2658,7 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                             </select>
                                         </div>
                                         <div className="form-field">
-                                            <label>Impacto</label>
+                                            <label>Impacto<Tooltip text="Qual o nível de impacto (de 1 a 5) caso o risco se materialize?"><HelpIcon /></Tooltip></label>
                                             <select value={item.impacto || '3 - Moderado'} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'impacto', e.target.value)}>
                                                 <option value="5 - Muito Alto">5 - Muito Alto</option>
                                                 <option value="4 - Alto">4 - Alto</option>
@@ -2447,15 +2668,15 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                             </select>
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Risco</label>
+                                            <label>Risco<Tooltip text="Descreva o risco potencial. O que pode dar errado?"><HelpIcon /></Tooltip></label>
                                             <textarea value={item.risco || ''} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'risco', e.target.value)} className={isFieldInvalid(`planoRiscos_${index}_risco`) ? 'validation-error-field' : ''} />
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Ação</label>
+                                            <label>Ação<Tooltip text="Qual ação concreta será tomada para implementar a estratégia definida?"><HelpIcon /></Tooltip></label>
                                             <textarea value={item.acao || ''} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'acao', e.target.value)} className={isFieldInvalid(`planoRiscos_${index}_acao`) ? 'validation-error-field' : ''} />
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Mitigação</label>
+                                            <label>Mitigação<Tooltip text="Descreva as ações de mitigação planejadas para reduzir a probabilidade ou o impacto do risco."><HelpIcon /></Tooltip></label>
                                             <textarea value={item.mitigacao || ''} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'mitigacao', e.target.value)} />
                                         </div>
                                     </div>
@@ -2486,7 +2707,12 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
             case 7: // Segurança e Acessos
                 return (
                     <div className="step-content">
-                        <h3>{steps[7]}</h3>
+                        <h3>
+                            {steps[7]}
+                            <Tooltip text="Liste todos os perfis de acesso, permissões ou credenciais que precisam ser criados, alterados ou utilizados durante a mudança. Justifique a necessidade de cada um.">
+                                <HelpIcon />
+                            </Tooltip>
+                        </h3>
                         {isFieldInvalid('segurancaAcessos_empty') && <p className="table-error-message">{(validationErrors.find(e => e.field === 'segurancaAcessos_empty') as any).message}</p>}
                         
                         <div className="implementation-plan-list">
@@ -2506,15 +2732,15 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                     </div>
                                     <div className="form-grid">
                                         <div className="form-field">
-                                            <label>Nível de acesso</label>
+                                            <label>Nível de acesso<Tooltip text="Descreva o nível de permissão necessário (ex: Administrador, Leitura, Escrita)."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={perfil.nivelAcesso || ''} onChange={(e) => handleSegurancaPerfisChange(index, 'nivelAcesso', e.target.value)} className={isFieldInvalid(`segurancaAcessos_${index}_nivelAcesso`) ? 'validation-error-field' : ''} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Plataforma</label>
+                                            <label>Plataforma<Tooltip text="Sistema ou plataforma onde o acesso é necessário (ex: SAP, Windows Server, Protheus)."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={perfil.plataforma || ''} onChange={(e) => handleSegurancaPerfisChange(index, 'plataforma', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Ambiente</label>
+                                            <label>Ambiente<Tooltip text="Ambiente específico do acesso (Desenvolvimento, Homologação ou Produção)."><HelpIcon /></Tooltip></label>
                                             <select value={perfil.ambiente || 'Produção'} onChange={(e) => handleSegurancaPerfisChange(index, 'ambiente', e.target.value)}>
                                                 <option value="Desenvolvimento">Desenvolvimento</option>
                                                 <option value="Homologação">Homologação</option>
@@ -2522,27 +2748,27 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                             </select>
                                         </div>
                                         <div className="form-field">
-                                            <label>Grupos de acesso</label>
+                                            <label>Grupos de acesso<Tooltip text="Nome dos grupos de segurança aos quais o usuário deve ser adicionado (ex: 'G_FINANCEIRO_TOTAL')."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={perfil.gruposAcesso || ''} onChange={(e) => handleSegurancaPerfisChange(index, 'gruposAcesso', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Item de Configuração</label>
+                                            <label>Item de Configuração<Tooltip text="Ativo de TI específico que será acessado (ex: Servidor SRV-DB01, Pasta \\SHARE\FIN)."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={perfil.itemConfiguracao || ''} onChange={(e) => handleSegurancaPerfisChange(index, 'itemConfiguracao', e.target.value)} />
                                         </div>
                                         <div className="form-field">
-                                            <label>Área de Negócio</label>
+                                            <label>Área de Negócio<Tooltip text="Departamento ou área da empresa que utilizará o acesso."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={perfil.areaNegocio || ''} onChange={(e) => handleSegurancaPerfisChange(index, 'areaNegocio', e.target.value)} />
                                         </div>
                                          <div className="form-field full-width">
-                                            <label>Usuários</label>
+                                            <label>Usuários<Tooltip text="Liste os nomes dos usuários que precisarão deste acesso."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={perfil.usuarios || ''} onChange={(e) => handleSegurancaPerfisChange(index, 'usuarios', e.target.value)} placeholder="Ex: Nome Sobrenome, Outro Nome..."/>
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Login de acesso</label>
+                                            <label>Login de acesso<Tooltip text="Liste os logins/nomes de usuário correspondentes."><HelpIcon /></Tooltip></label>
                                             <input type="text" value={perfil.loginAcesso || ''} onChange={(e) => handleSegurancaPerfisChange(index, 'loginAcesso', e.target.value)} placeholder="Ex: usuario1, usuario2..."/>
                                         </div>
                                         <div className="form-field full-width">
-                                            <label>Justificativa do Acesso</label>
+                                            <label>Justificativa do Acesso<Tooltip text="Explique por que este acesso é necessário para a mudança ou para a operação após a mudança."><HelpIcon /></Tooltip></label>
                                             <textarea value={perfil.justificativa || ''} onChange={(e) => handleSegurancaPerfisChange(index, 'justificativa', e.target.value)} className={isFieldInvalid(`segurancaAcessos_${index}_justificativa`) ? 'validation-error-field' : ''} />
                                         </div>
                                     </div>
@@ -2569,7 +2795,12 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
             case 8: // Contatos
                 return (
                     <div className="step-content">
-                        <h3>{steps[8]} (Escalonamento)</h3>
+                        <h3>
+                            {steps[8]} (Escalonamento)
+                            <Tooltip text="Liste as pessoas-chave que devem ser contatadas durante a implementação da mudança, especialmente em caso de problemas (escalonamento).">
+                                <HelpIcon />
+                            </Tooltip>
+                        </h3>
                         {isFieldInvalid('contatos_empty') && <p className="table-error-message">{(validationErrors.find(e => e.field === 'contatos_empty') as any).message}</p>}
                         
                         <div className="implementation-plan-list">
@@ -2588,18 +2819,18 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                         </button>
                                     </div>
                                     <div className="form-grid">
-                                        <div className="form-field"><label>Nome</label><input type="text" value={item.nome || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'nome', e.target.value)} className={isFieldInvalid(`contatos_${index}_nome`) ? 'validation-error-field' : ''} /></div>
-                                        <div className="form-field"><label>Cargo</label><input type="text" value={item.cargo || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'cargo', e.target.value)} /></div>
-                                        <div className="form-field"><label>E-mail</label><input type="email" value={item.email || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'email', e.target.value)} className={isFieldInvalid(`contatos_${index}_email`) ? 'validation-error-field' : ''} /></div>
-                                        <div className="form-field"><label>Telefones</label><input type="text" value={item.telefones || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'telefones', e.target.value)} /></div>
-                                        <div className="form-field"><label>Comunicação</label><input type="text" value={item.comunicacao || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'comunicacao', e.target.value)} /></div>
-                                        <div className="form-field"><label>Local de Atuação</label><input type="text" value={item.localAtuacao || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'localAtuacao', e.target.value)} /></div>
-                                        <div className="form-field"><label>Líder Imediato</label><input type="text" value={item.liderImediato || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'liderImediato', e.target.value)} /></div>
-                                        <div className="form-field"><label>E-mail Líder Imediato</label><input type="email" value={item.emailLiderImediato || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'emailLiderImediato', e.target.value)} /></div>
-                                        <div className="form-field"><label>Unidade/Filial</label><input type="text" value={item.unidadeFilial || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'unidadeFilial', e.target.value)} /></div>
-                                        <div className="form-field"><label>Área</label><input type="text" value={item.area || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'area', e.target.value)} /></div>
-                                        <div className="form-field"><label>Gestor da Área</label><input type="text" value={item.gestorArea || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'gestorArea', e.target.value)} /></div>
-                                        <div className="form-field full-width"><label>Comunicação Envolvida</label><textarea value={item.comunicacaoEnvolvida || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'comunicacaoEnvolvida', e.target.value)} /></div>
+                                        <div className="form-field"><label>Nome<Tooltip text="Nome completo do contato."><HelpIcon /></Tooltip></label><input type="text" value={item.nome || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'nome', e.target.value)} className={isFieldInvalid(`contatos_${index}_nome`) ? 'validation-error-field' : ''} /></div>
+                                        <div className="form-field"><label>Cargo<Tooltip text="Cargo ou função do contato na empresa."><HelpIcon /></Tooltip></label><input type="text" value={item.cargo || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'cargo', e.target.value)} /></div>
+                                        <div className="form-field"><label>E-mail<Tooltip text="E-mail principal do contato."><HelpIcon /></Tooltip></label><input type="email" value={item.email || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'email', e.target.value)} className={isFieldInvalid(`contatos_${index}_email`) ? 'validation-error-field' : ''} /></div>
+                                        <div className="form-field"><label>Telefones<Tooltip text="Números de telefone (fixo e celular) para contato rápido."><HelpIcon /></Tooltip></label><input type="text" value={item.telefones || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'telefones', e.target.value)} /></div>
+                                        <div className="form-field"><label>Comunicação<Tooltip text="Forma preferencial de comunicação (ex: Teams, WhatsApp)."><HelpIcon /></Tooltip></label><input type="text" value={item.comunicacao || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'comunicacao', e.target.value)} /></div>
+                                        <div className="form-field"><label>Local de Atuação<Tooltip text="Cidade, filial ou departamento onde o contato trabalha."><HelpIcon /></Tooltip></label><input type="text" value={item.localAtuacao || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'localAtuacao', e.target.value)} /></div>
+                                        <div className="form-field"><label>Líder Imediato<Tooltip text="Nome do gestor direto do contato."><HelpIcon /></Tooltip></label><input type="text" value={item.liderImediato || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'liderImediato', e.target.value)} /></div>
+                                        <div className="form-field"><label>E-mail Líder Imediato<Tooltip text="E-mail do gestor direto."><HelpIcon /></Tooltip></label><input type="email" value={item.emailLiderImediato || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'emailLiderImediato', e.target.value)} /></div>
+                                        <div className="form-field"><label>Unidade/Filial<Tooltip text="Unidade de negócio ou filial da Sipal."><HelpIcon /></Tooltip></label><input type="text" value={item.unidadeFilial || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'unidadeFilial', e.target.value)} /></div>
+                                        <div className="form-field"><label>Área<Tooltip text="Área ou departamento específico."><HelpIcon /></Tooltip></label><input type="text" value={item.area || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'area', e.target.value)} /></div>
+                                        <div className="form-field"><label>Gestor da Área<Tooltip text="Nome do gestor da área."><HelpIcon /></Tooltip></label><input type="text" value={item.gestorArea || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'gestorArea', e.target.value)} /></div>
+                                        <div className="form-field full-width"><label>Comunicação Envolvida<Tooltip text="Descreva o papel deste contato na comunicação da mudança (ex: 'Ponto focal para o time de vendas')."><HelpIcon /></Tooltip></label><textarea value={item.comunicacaoEnvolvida || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'comunicacaoEnvolvida', e.target.value)} /></div>
                                     </div>
                                 </div>
                             )) : (
@@ -2637,7 +2868,12 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
 
                 return (
                     <div className="step-content">
-                        <h3>{steps[9]}</h3>
+                        <h3>
+                            {steps[9]}
+                            <Tooltip text="Este checklist de governança ajuda a garantir que os principais pontos de controle foram considerados. Responda a cada item com atenção. Respostas 'Não' ou 'N/A' exigem uma justificativa.">
+                                <HelpIcon />
+                            </Tooltip>
+                        </h3>
                         <p>Responda às seguintes perguntas para garantir que todos os aspectos da mudança foram considerados.</p>
                         <div className="accordion">
                         {Object.entries(groupedChecklist).map(([scope, items], scopeIndex) => (
@@ -2657,18 +2893,13 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                         {Array.isArray(items) && items.map((item, itemIndex) => {
                                             const globalIndex = formData.checklist.findIndex(ci => ci.question === item.question);
                                             return (
-                                                <div key={globalIndex} className={`form-field full-width card-like-section ${isFieldInvalid(`checklist_${globalIndex}_answer`) || isFieldInvalid(`checklist_${globalIndex}_justification`) ? 'validation-error-section' : ''}`}>
-                                                    <label>{item.question}</label>
-                                                    <ChecklistRadioGroup
-                                                        name={`checklist_${globalIndex}`}
-                                                        selectedValue={item.answer}
-                                                        onChange={(value) => handleChecklistChange('checklist', globalIndex, 'answer', value)}
-                                                        options={[
-                                                            { value: 'Sim', label: 'Sim', className: 'sim', icon: <CheckIcon/> },
-                                                            { value: 'Não', label: 'Não', className: 'nao', icon: <AlertIcon/> },
-                                                            { value: 'N/A', label: 'N/A', className: 'na', icon: '🚫' },
-                                                        ]}
-                                                    />
+                                                <div key={globalIndex} className={`checklist-question-container ${isFieldInvalid(`checklist_${globalIndex}_answer`) || isFieldInvalid(`checklist_${globalIndex}_justification`) ? 'validation-error-section' : ''}`}>
+                                                    <p className="checklist-question-text">{item.question}</p>
+                                                    <div className="checklist-answer-buttons">
+                                                        <button type="button" className={`checklist-answer-btn sim ${item.answer === 'Sim' ? 'selected' : ''}`} onClick={() => handleChecklistChange('checklist', globalIndex, 'answer', 'Sim')}><CheckIcon /> Sim</button>
+                                                        <button type="button" className={`checklist-answer-btn nao ${item.answer === 'Não' ? 'selected' : ''}`} onClick={() => handleChecklistChange('checklist', globalIndex, 'answer', 'Não')}><AlertIcon /> Não</button>
+                                                        <button type="button" className={`checklist-answer-btn na ${item.answer === 'N/A' ? 'selected' : ''}`} onClick={() => handleChecklistChange('checklist', globalIndex, 'answer', 'N/A')}><BlockIcon /> N/A</button>
+                                                    </div>
                                                     {(item.answer === 'Não' || item.answer === 'N/A') && (
                                                         <div className="conditional-fields" style={{paddingTop: '1rem', marginTop: '1rem'}}>
                                                             <div className="form-field">
@@ -2734,21 +2965,16 @@ const NewRequestPage = ({ addRequest, currentUser }) => {
                                         {Array.isArray(items) && items.map((item, itemIndex) => {
                                             const globalIndex = formData.checklistSAP.findIndex(ci => ci.question === item.question);
                                             return (
-                                                <div key={globalIndex} className={`form-field full-width card-like-section ${isFieldInvalid(`checklistSAP_${globalIndex}_answer`) || isFieldInvalid(`checklistSAP_${globalIndex}_justification`) ? 'validation-error-section' : ''}`}>
-                                                    <label className="checklist-question-label">
+                                                <div key={globalIndex} className={`checklist-question-container ${isFieldInvalid(`checklistSAP_${globalIndex}_answer`) || isFieldInvalid(`checklistSAP_${globalIndex}_justification`) ? 'validation-error-section' : ''}`}>
+                                                    <p className="checklist-question-text">
                                                         <span className="checklist-question-id">{item.id}</span>
                                                         {item.question}
-                                                    </label>
-                                                    <ChecklistRadioGroup
-                                                        name={`checklistSAP_${globalIndex}`}
-                                                        selectedValue={item.answer}
-                                                        onChange={(value) => handleChecklistChange('checklistSAP', globalIndex, 'answer', value)}
-                                                        options={[
-                                                            { value: 'Sim', label: 'Sim', className: 'sim', icon: <CheckIcon/> },
-                                                            { value: 'Não', label: 'Não', className: 'nao', icon: <AlertIcon/> },
-                                                            { value: 'N/A', label: 'N/A', className: 'na', icon: '🚫' },
-                                                        ]}
-                                                    />
+                                                    </p>
+                                                    <div className="checklist-answer-buttons">
+                                                        <button type="button" className={`checklist-answer-btn sim ${item.answer === 'Sim' ? 'selected' : ''}`} onClick={() => handleChecklistChange('checklistSAP', globalIndex, 'answer', 'Sim')}><CheckIcon /> Sim</button>
+                                                        <button type="button" className={`checklist-answer-btn nao ${item.answer === 'Não' ? 'selected' : ''}`} onClick={() => handleChecklistChange('checklistSAP', globalIndex, 'answer', 'Não')}><AlertIcon /> Não</button>
+                                                        <button type="button" className={`checklist-answer-btn na ${item.answer === 'N/A' ? 'selected' : ''}`} onClick={() => handleChecklistChange('checklistSAP', globalIndex, 'answer', 'N/A')}><BlockIcon /> N/A</button>
+                                                    </div>
                                                     <div className="additional-checklist-fields" style={{paddingTop: '1rem', marginTop: '1rem'}}>
                                                         <div className="form-grid">
                                                             {(item.answer === 'Não' || item.answer === 'N/A') && (
