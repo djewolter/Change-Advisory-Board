@@ -182,6 +182,9 @@ body {
 .auth-toggle {
     text-align: center;
     margin-top: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
 }
 .auth-toggle button {
     background: none;
@@ -191,6 +194,20 @@ body {
     cursor: pointer;
     text-decoration: underline;
     font-size: 0.95rem;
+}
+
+.forgot-password-link {
+    background: none;
+    border: none;
+    color: var(--sipal-dark-gray);
+    font-size: 0.8rem;
+    cursor: pointer;
+    text-align: right;
+    margin-top: 0.25rem;
+    text-decoration: underline;
+}
+.forgot-password-link:hover {
+    color: var(--sipal-blue);
 }
 /* --- End Auth Styles --- */
 
@@ -213,7 +230,6 @@ main {
   color: var(--sipal-blue);
   font-size: 1.75rem;
   margin-bottom: 1.5rem;
-  border-bottom: 2px solid var(--sipal-teal);
   padding-bottom: 0.5rem;
 }
 
@@ -341,61 +357,93 @@ main {
 
 
 /* Wizard Styles */
+.wizard-header-section {
+    margin-bottom: 2rem;
+    border-bottom: 2px solid var(--sipal-teal);
+    padding-bottom: 0.5rem;
+}
+
+.wizard-title {
+    color: var(--sipal-blue);
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin: 0;
+}
+
 .wizard-progress-bar {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 2rem;
+    position: relative;
+    margin-bottom: 2.5rem;
     padding: 0;
     list-style: none;
 }
-.progress-step {
-    flex: 1;
-    text-align: center;
-    font-size: 0.85rem;
-    color: var(--sipal-dark-gray);
+
+.wizard-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     position: relative;
+    flex: 1;
+    cursor: pointer;
+    z-index: 2; /* Above the line */
 }
-.progress-step::before {
+
+.wizard-step:not(:last-child)::after {
     content: '';
-    width: 24px;
-    height: 24px;
+    position: absolute;
+    top: 20px; /* Half of indicator height (40px) */
+    left: 50%;
+    width: 100%;
+    height: 3px;
+    background-color: var(--sipal-gray);
+    z-index: -1;
+    transform: translateY(-50%);
+}
+
+.wizard-step.completed:not(:last-child)::after {
+    background-color: var(--sipal-teal);
+}
+
+.step-indicator {
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
     background-color: var(--sipal-gray);
-    border: 2px solid var(--sipal-gray);
-    display: block;
-    margin: 0 auto 0.5rem;
-    transition: all 0.3s ease;
-}
-.progress-step.active::before {
-    background-color: var(--sipal-teal);
-    border-color: var(--sipal-teal);
-}
-.progress-step.completed::before {
-    content: '✔';
-    color: var(--sipal-white);
-    background-color: var(--status-approved);
-    border-color: var(--status-approved);
-    font-size: 14px;
-    line-height: 22px;
-}
-.progress-step.error::before {
-    content: '!';
-    color: var(--sipal-white);
-    background-color: var(--status-rejeitado);
-    border-color: var(--status-rejeitado);
-    font-size: 16px;
-    font-weight: bold;
-    line-height: 22px;
-}
-.progress-step .step-name {
+    color: var(--sipal-dark-gray);
+    display: flex;
+    align-items: center;
+    justify-content: center;
     font-weight: 600;
-    transition: color 0.3s ease;
+    font-size: 1.1rem;
+    border: 2px solid var(--sipal-white); /* Space from line */
+    transition: background-color 0.3s, color 0.3s;
 }
-.progress-step.active .step-name {
+
+.wizard-step.active .step-indicator {
+    background-color: var(--sipal-teal);
+    color: var(--sipal-white);
+    box-shadow: 0 0 0 3px rgba(0, 132, 121, 0.2);
+}
+
+.wizard-step.completed .step-indicator {
+    background-color: var(--sipal-teal);
+    color: var(--sipal-white);
+}
+
+.step-label {
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+    color: var(--sipal-dark-gray);
+    text-align: center;
+    max-width: 120px;
+    line-height: 1.2;
+    font-weight: 500;
+}
+
+.wizard-step.active .step-label {
     color: var(--sipal-teal);
-}
-.progress-step.error .step-name {
-    color: var(--status-rejeitado);
+    font-weight: 700;
 }
 
 
@@ -1246,4 +1294,62 @@ main {
 .checklist-question-label {
     display: flex;
     align-items: center;
+}
+
+/* NEW STYLE: Continue Draft Button */
+.btn-continue-draft {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background-color: var(--sipal-teal); /* Use brand color */
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 20px; /* Pill shape */
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    text-decoration: none;
+}
+
+.btn-continue-draft:hover {
+    background-color: #006a60; /* Darker teal */
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.btn-continue-draft svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* NEW STYLE: Copy Request Button */
+.btn-copy-request {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background-color: var(--sipal-blue); /* Use secondary brand color */
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 20px; /* Pill shape */
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    text-decoration: none;
+}
+
+.btn-copy-request:hover {
+    background-color: #00154a; /* Darker blue */
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.btn-copy-request svg {
+    width: 16px;
+    height: 16px;
 }
