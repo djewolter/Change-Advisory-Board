@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI } from "@google/genai";
 import jsPDF from 'jspdf';
+import * as XLSX from 'xlsx';
 
 // As per the brand guide, page 10
 const sipalBlue = '#012169';
@@ -13,6 +14,24 @@ const steps = [
     "Plano de Retorno", "Plano de Comunicação", "Risco de Mudança", "Segurança e Acessos", 
     "Contatos", "Checklist", "Checklist SAP", "Anexos e Envio", "Análise e Finalização"
 ];
+
+const generateTimeSlots = () => {
+    const slots = [];
+    // Generate slots from 08:00 to 18:00 every 20 mins
+    for(let h=8; h<18; h++) {
+        for(let m=0; m<60; m+=20) {
+            const sh = String(h).padStart(2,'0');
+            const sm = String(m).padStart(2,'0');
+            // End time
+            let eh = h; let em = m + 20;
+            if(em >= 60) { eh++; em -= 60; }
+            const seh = String(eh).padStart(2,'0');
+            const sem = String(em).padStart(2,'0');
+            slots.push(`${sh}:${sm} - ${seh}:${sem}`);
+        }
+    }
+    return slots;
+};
 
 const generateAndSavePdf = (formData, requestId = null) => {
     const doc = new jsPDF({
@@ -155,9 +174,26 @@ const generateAndSavePdf = (formData, requestId = null) => {
     addField('Solicitante:', informacoesGerais.solicitante);
     addField('Líder do Produto:', informacoesGerais.liderProduto);
     addField('Data da Mudança:', informacoesGerais.dataMudanca ? new Date(informacoesGerais.dataMudanca + 'T00:00:00').toLocaleDateString('pt-BR', {timeZone: 'UTC'}) : '-');
+    addField('Agenda CAB:', informacoesGerais.dataAgendaCAB);
     addField('Motivo da Mudança:', informacoesGerais.motivoMudanca);
     addField('Impacto de Não Realizar:', informacoesGerais.impactoNaoRealizar);
     addField('Classificação:', informacoesGerais.classificacao);
+
+    if (informacoesGerais.classificacao === 'Emergencial') {
+        addSectionHeader("Justificativa Emergencial");
+        addFullWidthText("1. Descreva o incidente que motivou a solicitação emergencial:", true);
+        addFullWidthText(informacoesGerais.motivoEmergencia || '-');
+        y += 3;
+        addFullWidthText("2. Explique por que a situação não pode aguardar a próxima agenda regular do CAB:", true);
+        addFullWidthText(informacoesGerais.justificativaEmergencia || '-');
+        y += 3;
+        addFullWidthText("3. Riscos financeiros, de processo, regulatórios ou de continuidade operacional:", true);
+        addFullWidthText(informacoesGerais.riscosEmergencia || '-');
+        y += 3;
+        addFullWidthText("4. Justificativa técnica da ausência de solução alternativa:", true);
+        addFullWidthText(informacoesGerais.tecnicaEmergencia || '-');
+    }
+
     addField('Serviços Afetados:', informacoesGerais.servicosAfetados);
     addField('Sistemas Afetados:', informacoesGerais.sistemasAfetados);
     addField('Haverá indisponibilidade:', informacoesGerais.indisponibilidade);
@@ -411,9 +447,9 @@ const Tabs = ({ activeTab, setActiveTab }) => (
             Controle das Minhas Solicitações
         </button>
         <button
-            className={`tab-button ${activeTab === 'analysis' ? 'active' : ''}`}
+            className={`tab-button ${(activeTab === 'analysis' || activeTab === 'dashboard') ? 'active' : ''}`}
             onClick={() => setActiveTab('analysis')}
-            aria-current={activeTab === 'analysis' ? 'page' : undefined}
+            aria-current={(activeTab === 'analysis' || activeTab === 'dashboard') ? 'page' : undefined}
         >
             Controle Governança
         </button>
@@ -421,7 +457,7 @@ const Tabs = ({ activeTab, setActiveTab }) => (
 );
 
 // Authentication Page
-const AuthPage = ({ onLogin, onRegister, users }) => {
+const AuthPage = ({ onLogin, onRegister, onRecover, users }) => {
     const [authMode, setAuthMode] = useState('login'); // 'login', 'register', 'recover'
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
@@ -429,10 +465,11 @@ const AuthPage = ({ onLogin, onRegister, users }) => {
     const [confirmPassword, setConfirmPassword] = useState('');
     const [error, setError] = useState('');
     const [successMessage, setSuccessMessage] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
-    const handleAuth = (e) => {
+    const handleAuth = async (e) => {
         e.preventDefault();
         setError('');
         setSuccessMessage('');
@@ -442,33 +479,48 @@ const AuthPage = ({ onLogin, onRegister, users }) => {
             return;
         }
 
+        setIsSubmitting(true);
+
+        // Simulate network delay for better UX
+        await new Promise(resolve => setTimeout(resolve, 800));
+
         if (authMode === 'recover') {
-            // Simulate recovery
-            setTimeout(() => {
-                setSuccessMessage(`Um link para redefinir a senha foi enviado para ${email}.`);
-            }, 500);
+            const pwd = onRecover ? onRecover(email) : null;
+            setIsSubmitting(false);
+            
+            if (pwd) {
+                // In a real app we wouldn't show the password, but this is for the demo/simulation
+                setSuccessMessage(`[Simulação] Usuário encontrado.\nSua senha é: ${pwd}\n(Copie e faça login)`);
+            } else {
+                 setSuccessMessage(`[Simulação] Se o e-mail estiver cadastrado, as instruções seriam enviadas.`);
+            }
             return;
         }
 
         if (authMode === 'login') {
             const success = onLogin(email, password);
+            setIsSubmitting(false);
             if (!success) {
                 setError('E-mail ou senha inválidos.');
             }
         } else if (authMode === 'register') { // Register mode
             if (!name.trim()) {
+                setIsSubmitting(false);
                 setError('O campo Nome é obrigatório.');
                 return;
             }
             if (password.length < 6) {
+                setIsSubmitting(false);
                 setError('A senha deve ter pelo menos 6 caracteres.');
                 return;
             }
             if (password !== confirmPassword) {
+                setIsSubmitting(false);
                 setError('As senhas não coincidem.');
                 return;
             }
             const success = onRegister(name, email, password);
+            setIsSubmitting(false);
             if (!success) {
                 setError('Este e-mail já está cadastrado.');
             }
@@ -485,10 +537,11 @@ const AuthPage = ({ onLogin, onRegister, users }) => {
     };
 
     const getSubmitButtonText = () => {
+        if (isSubmitting) return 'Processando...';
         switch (authMode) {
             case 'login': return 'Entrar';
             case 'register': return 'Registrar';
-            case 'recover': return 'Enviar Link';
+            case 'recover': return 'Recuperar Senha';
             default: return '';
         }
     };
@@ -507,30 +560,31 @@ const AuthPage = ({ onLogin, onRegister, users }) => {
                 </div>
                 <h2>{getTitle()}</h2>
                 {error && <p className="auth-error">{error}</p>}
-                {successMessage && <p className="auth-success" style={{backgroundColor: '#d4edda', color: '#155724', border: '1px solid #c3e6cb', padding: '0.75rem', borderRadius: '5px', textAlign: 'center', marginBottom: '1rem'}}>{successMessage}</p>}
+                {successMessage && <p className="auth-success" style={{backgroundColor: '#d4edda', color: '#155724', border: '1px solid #c3e6cb', padding: '0.75rem', borderRadius: '5px', textAlign: 'center', marginBottom: '1rem', whiteSpace: 'pre-line'}}>{successMessage}</p>}
                 
                 <form className="auth-form" onSubmit={handleAuth}>
                     {authMode === 'register' && (
                         <div className="form-field">
                             <label htmlFor="name">Nome Completo</label>
-                            <input type="text" id="name" value={name} onChange={(e) => setName(e.target.value)} required />
+                            <input type="text" id="name" value={name} onChange={(e) => setName(e.target.value)} required disabled={isSubmitting} />
                         </div>
                     )}
                     
                     <div className="form-field">
                         <label htmlFor="email">E-mail</label>
-                        <input type="email" id="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                        <input type="email" id="email" value={email} onChange={(e) => setEmail(e.target.value)} required disabled={isSubmitting} />
                     </div>
 
                     {authMode !== 'recover' && (
                         <div className="form-field">
                             <label htmlFor="password">Senha</label>
-                            <input type="password" id="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+                            <input type="password" id="password" value={password} onChange={(e) => setPassword(e.target.value)} required disabled={isSubmitting} />
                             {authMode === 'login' && (
                                 <button 
                                     type="button" 
                                     className="forgot-password-link"
                                     onClick={() => switchTo('recover')}
+                                    disabled={isSubmitting}
                                 >
                                     Esqueci minha senha
                                 </button>
@@ -541,21 +595,23 @@ const AuthPage = ({ onLogin, onRegister, users }) => {
                     {authMode === 'register' && (
                          <div className="form-field">
                             <label htmlFor="confirmPassword">Confirmar Senha</label>
-                            <input type="password" id="confirmPassword" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required />
+                            <input type="password" id="confirmPassword" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required disabled={isSubmitting} />
                         </div>
                     )}
                     
-                    <button type="submit" className="submit-btn auth-btn">{getSubmitButtonText()}</button>
+                    <button type="submit" className="submit-btn auth-btn" disabled={isSubmitting}>
+                        {getSubmitButtonText()}
+                    </button>
                 </form>
                 
                 <div className="auth-toggle">
                     {authMode === 'login' && (
-                        <button onClick={() => switchTo('register')}>
+                        <button onClick={() => switchTo('register')} disabled={isSubmitting}>
                             Não tem uma conta? Registre-se
                         </button>
                     )}
                     {(authMode === 'register' || authMode === 'recover') && (
-                        <button onClick={() => switchTo('login')}>
+                        <button onClick={() => switchTo('login')} disabled={isSubmitting}>
                             {authMode === 'recover' ? 'Voltar para o Login' : 'Já tem uma conta? Faça login'}
                         </button>
                     )}
@@ -670,6 +726,23 @@ const EditIcon = () => (
     </svg>
 );
 
+const UploadIcon = () => (
+     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="feather feather-upload-cloud">
+        <polyline points="16 16 12 12 8 16"></polyline>
+        <line x1="12" y1="12" x2="12" y2="21"></line>
+        <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path>
+        <polyline points="16 16 12 12 8 16"></polyline>
+    </svg>
+);
+
+const CalendarIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+        <line x1="16" y1="2" x2="16" y2="6"></line>
+        <line x1="8" y1="2" x2="8" y2="6"></line>
+        <line x1="3" y1="10" x2="21" y2="10"></line>
+    </svg>
+);
 
 interface ModalProps {
     isOpen: boolean;
@@ -702,6 +775,285 @@ const Modal = ({ isOpen, onClose, title, children, footer }: ModalProps) => {
                 <div className="modal-body">{children}</div>
                 {footer && <div className="modal-footer">{footer}</div>}
             </div>
+        </div>
+    );
+};
+
+const DayEditor = ({ date, data, onSave, onClose }) => {
+    const [status, setStatus] = useState(data?.status || 'open');
+    const [selectedSlots, setSelectedSlots] = useState(data?.slots || []);
+
+    const allSlots = useMemo(() => generateTimeSlots(), []);
+
+    const toggleSlot = (slot) => {
+        if (selectedSlots.includes(slot)) {
+            setSelectedSlots(selectedSlots.filter(s => s !== slot));
+        } else {
+            setSelectedSlots([...selectedSlots, slot]);
+        }
+    };
+
+    const handleSelectAll = () => setSelectedSlots(allSlots);
+    const handleClearSlots = () => setSelectedSlots([]);
+
+    const handleSave = () => {
+        onSave({ status, slots: status === 'meeting' ? selectedSlots : [] });
+    };
+
+    return (
+        <div className="day-editor">
+            <h3>Configurar dia: {new Date(date).toLocaleDateString('pt-BR')}</h3>
+            
+            <div className="status-selector">
+                <h4>Status do Dia</h4>
+                <div className="radio-group-vertical">
+                    <label className={`status-option open ${status === 'open' ? 'selected' : ''}`}>
+                        <input 
+                            type="radio" 
+                            name="dayStatus" 
+                            value="open" 
+                            checked={status === 'open'} 
+                            onChange={() => setStatus('open')} 
+                        />
+                        <span className="status-label">Janela Aberta</span>
+                    </label>
+                    <label className={`status-option freeze ${status === 'freeze' ? 'selected' : ''}`}>
+                        <input 
+                            type="radio" 
+                            name="dayStatus" 
+                            value="freeze" 
+                            checked={status === 'freeze'} 
+                            onChange={() => setStatus('freeze')} 
+                        />
+                        <span className="status-label">Bloqueado (Freeze)</span>
+                    </label>
+                    <label className={`status-option meeting ${status === 'meeting' ? 'selected' : ''}`}>
+                        <input 
+                            type="radio" 
+                            name="dayStatus" 
+                            value="meeting" 
+                            checked={status === 'meeting'} 
+                            onChange={() => setStatus('meeting')} 
+                        />
+                        <span className="status-label">Reunião CAB</span>
+                    </label>
+                </div>
+            </div>
+
+            {status === 'meeting' && (
+                <div className="slots-config-section" style={{marginTop: '1.5rem', backgroundColor: '#fff', padding: '1rem', borderRadius: '8px', border: '1px solid #eee'}}>
+                    <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.5rem'}}>
+                        <h4 style={{margin:0, color:'#666'}}>Horários Disponíveis</h4>
+                        <div style={{display:'flex', gap:'5px'}}>
+                            <button type="button" onClick={handleSelectAll} className="nav-button secondary" style={{padding:'2px 8px', fontSize:'0.75rem'}}>Todos</button>
+                            <button type="button" onClick={handleClearSlots} className="nav-button secondary" style={{padding:'2px 8px', fontSize:'0.75rem'}}>Nenhum</button>
+                        </div>
+                    </div>
+                    <p style={{fontSize: '0.8rem', color: '#888', marginBottom: '1rem'}}>
+                        Selecione os horários que estarão disponíveis para agendamento.
+                    </p>
+                    <div className="slots-grid" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '8px'}}>
+                        {allSlots.map(slot => (
+                            <button
+                                key={slot}
+                                className={`slot-toggle-btn`}
+                                onClick={() => toggleSlot(slot)}
+                                style={{
+                                    padding: '0.4rem',
+                                    fontSize: '0.75rem',
+                                    border: selectedSlots.includes(slot) ? '1px solid var(--sipal-teal)' : '1px solid #ddd',
+                                    backgroundColor: selectedSlots.includes(slot) ? '#e0f2f1' : '#f9f9f9',
+                                    color: selectedSlots.includes(slot) ? 'var(--sipal-teal)' : '#666',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    fontWeight: selectedSlots.includes(slot) ? '600' : '400'
+                                }}
+                            >
+                                {slot}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            <div className="day-editor-actions">
+                <button onClick={onClose} className="nav-button secondary">Cancelar</button>
+                <button onClick={handleSave} className="submit-btn">Salvar Alterações</button>
+            </div>
+        </div>
+    );
+};
+
+const DashboardPage = ({ onBack }) => {
+    const [fileData, setFileData] = useState(null);
+    const [fileName, setFileName] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [stats, setStats] = useState({
+        total: 0,
+        approved: 0,
+        rejected: 0,
+        pending: 0,
+        emergency: 0,
+        standard: 0
+    });
+
+    const processExcel = (data) => {
+        // Assume first sheet
+        const worksheet = data.Sheets[data.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        // Skip header row and process data
+        const rows = jsonData.slice(1);
+        const total = rows.length;
+        
+        // Simple heuristics to find columns based on content keywords if headers aren't standard
+        // For this demo, we assume standard columns: ID, Status, Classification
+        // Or we just look for keywords in the row data
+        
+        let approved = 0;
+        let rejected = 0;
+        let pending = 0;
+        let emergency = 0;
+        let standard = 0;
+
+        rows.forEach(row => {
+            const rowStr = JSON.stringify(row).toLowerCase();
+            if (rowStr.includes('aprovado') || rowStr.includes('approved')) approved++;
+            else if (rowStr.includes('rejeitado') || rowStr.includes('rejected')) rejected++;
+            else pending++;
+
+            if (rowStr.includes('emergencial') || rowStr.includes('emergency')) emergency++;
+            else standard++;
+        });
+
+        setStats({
+            total,
+            approved,
+            rejected,
+            pending,
+            emergency,
+            standard
+        });
+    };
+
+    const handleFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setFileName(file.name);
+        setIsLoading(true);
+
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            const bstr = evt.target.result;
+            const wb = XLSX.read(bstr, { type: 'binary' });
+            processExcel(wb);
+            setFileData(wb); // Store raw wb if needed later
+            setIsLoading(false);
+        };
+        reader.readAsBinaryString(file);
+    };
+
+    return (
+        <div className="dashboard-page">
+            <div className="card">
+                <div className="request-list-header">
+                    <div>
+                        <h2>📊 Dashboard de Indicadores</h2>
+                        <span className="subtitle">Faça upload de uma planilha para visualizar as métricas</span>
+                    </div>
+                    <button onClick={onBack} className="nav-button secondary">Voltar</button>
+                </div>
+                
+                <div className="upload-container">
+                    <input 
+                        type="file" 
+                        id="excel-upload" 
+                        accept=".xlsx, .xls, .csv" 
+                        onChange={handleFileUpload}
+                        style={{display: 'none'}}
+                    />
+                    <label htmlFor="excel-upload" className="upload-box">
+                        <UploadIcon />
+                        <p>{fileName ? `Arquivo selecionado: ${fileName}` : "Arraste seu arquivo Excel aqui ou clique para selecionar"}</p>
+                        <span className="upload-hint">Suporta .xlsx, .xls e .csv</span>
+                    </label>
+                </div>
+            </div>
+
+            {stats.total > 0 && (
+                <div className="dashboard-content">
+                    <div className="kpi-grid">
+                        <div className="kpi-card total">
+                            <h3>Total de Requisições</h3>
+                            <div className="kpi-value">{stats.total}</div>
+                        </div>
+                        <div className="kpi-card approved">
+                            <h3>Aprovadas</h3>
+                            <div className="kpi-value">{stats.approved}</div>
+                            <span className="kpi-percent">{((stats.approved / stats.total) * 100).toFixed(1)}%</span>
+                        </div>
+                        <div className="kpi-card rejected">
+                            <h3>Rejeitadas</h3>
+                            <div className="kpi-value">{stats.rejected}</div>
+                            <span className="kpi-percent">{((stats.rejected / stats.total) * 100).toFixed(1)}%</span>
+                        </div>
+                        <div className="kpi-card pending">
+                            <h3>Pendentes</h3>
+                            <div className="kpi-value">{stats.pending}</div>
+                        </div>
+                    </div>
+
+                    <div className="charts-grid">
+                        <div className="card chart-card">
+                            <h3>Distribuição por Status</h3>
+                            <div className="simple-bar-chart">
+                                <div className="bar-group">
+                                    <div className="bar-label">Aprovado</div>
+                                    <div className="bar-track">
+                                        <div className="bar-fill approved" style={{width: `${(stats.approved / stats.total) * 100}%`}}></div>
+                                    </div>
+                                    <div className="bar-value">{stats.approved}</div>
+                                </div>
+                                <div className="bar-group">
+                                    <div className="bar-label">Rejeitado</div>
+                                    <div className="bar-track">
+                                        <div className="bar-fill rejected" style={{width: `${(stats.rejected / stats.total) * 100}%`}}></div>
+                                    </div>
+                                    <div className="bar-value">{stats.rejected}</div>
+                                </div>
+                                <div className="bar-group">
+                                    <div className="bar-label">Pendente</div>
+                                    <div className="bar-track">
+                                        <div className="bar-fill pending" style={{width: `${(stats.pending / stats.total) * 100}%`}}></div>
+                                    </div>
+                                    <div className="bar-value">{stats.pending}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="card chart-card">
+                            <h3>Classificação das Mudanças</h3>
+                             <div className="simple-bar-chart">
+                                <div className="bar-group">
+                                    <div className="bar-label">Padrão</div>
+                                    <div className="bar-track">
+                                        <div className="bar-fill standard" style={{width: `${(stats.standard / stats.total) * 100}%`}}></div>
+                                    </div>
+                                    <div className="bar-value">{stats.standard}</div>
+                                </div>
+                                <div className="bar-group">
+                                    <div className="bar-label">Emergencial</div>
+                                    <div className="bar-track">
+                                        <div className="bar-fill emergency" style={{width: `${(stats.emergency / stats.total) * 100}%`}}></div>
+                                    </div>
+                                    <div className="bar-value">{stats.emergency}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
@@ -857,10 +1209,76 @@ const MyRequestsPage = ({ requests, currentUser, kanbanStatuses, drafts, onConti
     );
 };
 
-const AnalysisPage = ({ requests, onAdminNewRequest }) => {
+const AnalysisPage = ({ requests, onAdminNewRequest, kanbanStatuses = {}, onNavigateToDashboard }) => {
     const [isAdmModalOpen, setIsAdmModalOpen] = useState(false);
+    const [isRoadmapModalOpen, setIsRoadmapModalOpen] = useState(false);
+    const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
     const [admPassword, setAdmPassword] = useState('');
     const [admError, setAdmError] = useState('');
+    const [isLocked, setIsLocked] = useState(true);
+    const [pagePassword, setPagePassword] = useState('');
+    const [pageError, setPageError] = useState('');
+
+    // Calendar state
+    // Initialize to October 2025 (Month index 9)
+    const [currentMonth, setCurrentMonth] = useState(9); 
+    const [currentYear, setCurrentYear] = useState(2025);
+    const [calendarData, setCalendarData] = useState({});
+    const [editingDate, setEditingDate] = useState(null);
+
+    // Calculate Scheduled Meetings
+    const scheduledMeetings = useMemo(() => {
+        const groups = {};
+        if (Array.isArray(requests)) {
+            requests.forEach(req => {
+                const agenda = req.formData?.informacoesGerais?.dataAgendaCAB;
+                if (agenda && agenda.trim() !== '') {
+                    if (!groups[agenda]) groups[agenda] = [];
+                    groups[agenda].push(req);
+                }
+            });
+        }
+        
+        // Sort by date/time
+        return Object.entries(groups).sort((a, b) => {
+            const parseDate = (str) => {
+                try {
+                    // Expected format: DD/MM/YYYY HH:mm - HH:mm
+                    const [datePart, timeRange] = str.split(' '); 
+                    if (!datePart || !timeRange) return new Date(0);
+                    const [day, month, year] = datePart.split('/');
+                    const startTime = timeRange.split('-')[0].trim();
+                    return new Date(`${year}-${month}-${day}T${startTime}:00`);
+                } catch (e) {
+                    return new Date(0);
+                }
+            };
+            return parseDate(a[0]).getTime() - parseDate(b[0]).getTime();
+        });
+    }, [requests]);
+
+    useEffect(() => {
+        const storedCalendar = localStorage.getItem('cab-calendar-data');
+        if (storedCalendar) {
+            setCalendarData(JSON.parse(storedCalendar));
+        }
+    }, []);
+
+    const saveCalendarData = (dateStr, newData) => {
+        const updated = { ...calendarData, [dateStr]: newData };
+        setCalendarData(updated);
+        localStorage.setItem('cab-calendar-data', JSON.stringify(updated));
+    };
+
+    const handlePageUnlock = (e) => {
+        e.preventDefault();
+        if (pagePassword === 'PMO@2026') {
+            setIsLocked(false);
+            setPageError('');
+        } else {
+            setPageError('Senha de acesso incorreta.');
+        }
+    };
 
     const handleAdminAccess = () => {
         if (admPassword === 'PMO@2025') {
@@ -882,9 +1300,7 @@ const AnalysisPage = ({ requests, onAdminNewRequest }) => {
             return '';
         }
         const stringData = String(cellData);
-        // If the data contains a comma, double quote, or newline, wrap it in double quotes.
         if (stringData.includes(',') || stringData.includes('"') || stringData.includes('\n')) {
-            // Escape inner double quotes by doubling them
             const escapedData = stringData.replace(/"/g, '""');
             return `"${escapedData}"`;
         }
@@ -927,12 +1343,118 @@ const AnalysisPage = ({ requests, onAdminNewRequest }) => {
         }
     };
 
+    // Calendar Helper Functions
+    const getDaysInMonth = (month, year) => {
+        return new Date(year, month + 1, 0).getDate();
+    };
+
+    const getFirstDayOfMonth = (month, year) => {
+        return new Date(year, month, 1).getDay();
+    };
+
+    const changeMonth = (offset) => {
+        let newMonth = currentMonth + offset;
+        let newYear = currentYear;
+
+        if (newMonth > 11) {
+            newMonth = 0;
+            newYear++;
+        } else if (newMonth < 0) {
+            newMonth = 11;
+            newYear--;
+        }
+
+        // Limit to Oct 2025 - Dec 2026
+        if (newYear < 2025 || (newYear === 2025 && newMonth < 9)) return;
+        if (newYear > 2026) return;
+
+        setCurrentMonth(newMonth);
+        setCurrentYear(newYear);
+    };
+
+    const renderCalendarGrid = () => {
+        const daysInMonth = getDaysInMonth(currentMonth, currentYear);
+        const firstDay = getFirstDayOfMonth(currentMonth, currentYear);
+        const days = [];
+
+        // Empty slots for previous month
+        for (let i = 0; i < firstDay; i++) {
+            days.push(<div key={`empty-${i}`} className="calendar-day empty"></div>);
+        }
+
+        // Days of current month
+        for (let day = 1; day <= daysInMonth; day++) {
+            const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const dayData = calendarData[dateStr] || { status: 'open' };
+            
+            days.push(
+                <div 
+                    key={day} 
+                    className={`calendar-day day-status-${dayData.status}`}
+                    onClick={() => setEditingDate(dateStr)}
+                >
+                    <span className="day-number">{day}</span>
+                </div>
+            );
+        }
+
+        return days;
+    };
+
+    const monthNames = [
+        "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+    ];
+
+    if (isLocked) {
+        return (
+            <div className="analysis-page">
+                <div className="card">
+                     <div className="auth-container" style={{padding: '2rem 0', background: 'none'}}>
+                        <div className="auth-card" style={{maxWidth: '400px', margin: '0 auto'}}>
+                            <h2>Acesso Restrito</h2>
+                            <p style={{textAlign: 'center', marginBottom: '1.5rem'}}>Esta página é restrita ao PMO e Governança.</p>
+                            <form onSubmit={handlePageUnlock}>
+                                <div className="form-field">
+                                    <label htmlFor="page-password">Senha de Acesso</label>
+                                    <input 
+                                        type="password" 
+                                        id="page-password" 
+                                        value={pagePassword} 
+                                        onChange={(e) => setPagePassword(e.target.value)} 
+                                        placeholder="Digite a senha..."
+                                        autoFocus
+                                    />
+                                </div>
+                                {pageError && <p className="auth-error" style={{marginTop: '1rem'}}>{pageError}</p>}
+                                <button type="submit" className="submit-btn auth-btn">Entrar</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="analysis-page">
             <div className="card">
                 <div className="request-list-header">
-                    <h2>Controle Governança</h2>
+                    <div>
+                        <h2>Controle Governança</h2>
+                        <span className="subtitle" style={{fontSize: '0.9rem', color: '#666'}}>Total: {requests.length} requisições</span>
+                    </div>
                     <div className="header-actions">
+                        <button onClick={onNavigateToDashboard} className="nav-button secondary" style={{marginRight: '0.5rem'}}>Dashboard</button>
+                         <button 
+                            onClick={() => setIsCalendarModalOpen(true)} 
+                            className="nav-button secondary" 
+                            style={{marginRight: '0.5rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem'}}
+                        >
+                            <CalendarIcon />
+                            Calendário Habilitado
+                        </button>
+                        <button onClick={() => setIsRoadmapModalOpen(true)} className="nav-button secondary" style={{marginRight: '0.5rem'}}>Roadmap DESENVOLVIMENTO DO PORTAL</button>
                         <button onClick={() => setIsAdmModalOpen(true)} className="admin-access-btn">ADM</button>
                         <button 
                             onClick={handleExportToExcel} 
@@ -944,8 +1466,37 @@ const AnalysisPage = ({ requests, onAdminNewRequest }) => {
                         </button>
                     </div>
                 </div>
-                <p>Visualize e gerencie todas as requisições de mudança submetidas. Você pode baixar um relatório em PDF para cada solicitação.</p>
+                <p>Visualize e gerencie todas as requisições de mudança submetidas por todos os usuários.</p>
             </div>
+
+            {/* Agenda Section */}
+            {scheduledMeetings.length > 0 && (
+                <div className="card meeting-cards-section">
+                    <h3 style={{color: sipalBlue, marginBottom: '1.5rem'}}>Agenda de Reuniões CAB</h3>
+                    <div className="meeting-grid">
+                        {scheduledMeetings.map(([dateString, reqs]) => {
+                            const [datePart, timePart] = dateString.split(' ');
+                            return (
+                                <div key={dateString} className="meeting-card">
+                                    <div className="meeting-header">
+                                        <span className="meeting-date">{datePart}</span>
+                                        <span className="meeting-time">{timePart || 'Horário indefinido'}</span>
+                                    </div>
+                                    <div className="meeting-body">
+                                        {reqs.map((req, idx) => (
+                                            <div key={idx} className="meeting-item">
+                                                <span className="meeting-item-id">{req.id}</span>
+                                                <span className="meeting-item-title" title={req.title}>{req.title}</span>
+                                                <span className="meeting-item-requester">Solic: {req.formData?.informacoesGerais?.solicitante || 'N/A'}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
             
             <div className="card">
                 <div className="request-list">
@@ -955,16 +1506,28 @@ const AnalysisPage = ({ requests, onAdminNewRequest }) => {
                                 <th>Nº Acompanhamento</th>
                                 <th>Título da Solicitação</th>
                                 <th>Solicitante</th>
+                                <th>Classificação</th>
+                                <th>Data da Mudança</th>
+                                <th>Status</th>
                                 <th>Ações</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {Array.isArray(requests) && requests.length > 0 ? requests.map(req => (
-                                req && (
+                            {Array.isArray(requests) && requests.length > 0 ? requests.map(req => {
+                                const statusClass = req.status.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+                                const statusText = kanbanStatuses[req.status] || req.status;
+                                const email = (req as any).solicitanteEmail;
+                                return req && (
                                     <tr key={req.id}>
                                         <td>{req.id}</td>
                                         <td>{req.title}</td>
-                                        <td>{req.formData?.informacoesGerais?.solicitante || 'N/A'}</td>
+                                        <td>
+                                            <div>{req.formData?.informacoesGerais?.solicitante || 'N/A'}</div>
+                                            {email && <div style={{fontSize: '0.8rem', color: '#666'}}>{email}</div>}
+                                        </td>
+                                        <td>{req.classification}</td>
+                                        <td>{req.formData?.informacoesGerais?.dataMudanca ? new Date(req.formData.informacoesGerais.dataMudanca + 'T00:00:00').toLocaleDateString('pt-BR', {timeZone: 'UTC'}) : '-'}</td>
+                                        <td><span className={`status-badge status-${statusClass}`}>{statusText}</span></td>
                                         <td style={{textAlign: 'center'}}>
                                             <button 
                                                 onClick={() => handleDownloadFullRequestPdf(req)} 
@@ -975,16 +1538,17 @@ const AnalysisPage = ({ requests, onAdminNewRequest }) => {
                                             </button>
                                         </td>
                                     </tr>
-                                )
-                            )) : (
+                                );
+                            }) : (
                                 <tr>
-                                    <td colSpan={4} style={{textAlign: 'center'}}>Nenhuma requisição encontrada.</td>
+                                    <td colSpan={7} style={{textAlign: 'center'}}>Nenhuma requisição encontrada.</td>
                                 </tr>
                             )}
                         </tbody>
                     </table>
                 </div>
             </div>
+            {/* Modals ... */}
             <Modal
                 isOpen={isAdmModalOpen}
                 onClose={() => setIsAdmModalOpen(false)}
@@ -1009,6 +1573,100 @@ const AnalysisPage = ({ requests, onAdminNewRequest }) => {
                     />
                     {admError && <p className="auth-error" style={{marginTop: '1rem', padding: '0.5rem'}}>{admError}</p>}
                 </div>
+            </Modal>
+             <Modal
+                isOpen={isRoadmapModalOpen}
+                onClose={() => setIsRoadmapModalOpen(false)}
+                title="Roadmap de Desenvolvimento do Portal"
+                footer={
+                    <button onClick={() => setIsRoadmapModalOpen(false)} className="nav-button">Fechar</button>
+                }
+            >
+                <div className="roadmap-content">
+                    <div className="roadmap-phase completed">
+                        <h3>✅ Fase 1: MVP (Lançado)</h3>
+                        <ul>
+                            <li>Digitalização do formulário de RDM</li>
+                            <li>Fluxo de aprovação básico</li>
+                            <li>Geração de PDF e Exportação Excel</li>
+                            <li>Painel de Controle de Governança</li>
+                        </ul>
+                    </div>
+                    <div className="roadmap-phase active">
+                        <h3>🚀 Fase 2: Integração & Segurança (Em Desenvolvimento)</h3>
+                        <ul>
+                            <li>Integração SSO (Single Sign-On) com Microsoft Azure AD</li>
+                            <li>Sincronização bidirecional com Jira para status de tickets</li>
+                            <li>Upload de múltiplos anexos com drag-and-drop (Implementado)</li>
+                        </ul>
+                    </div>
+                    <div className="roadmap-phase upcoming">
+                        <h3>🔮 Fase 3: Inteligência & Automação (Q3 2025)</h3>
+                        <ul>
+                            <li>Assistente de IA para preenchimento de riscos e planos de teste</li>
+                            <li>Validação automática de conflitos de agenda (Freeze Windows)</li>
+                            <li>Notificações automáticas via Teams/E-mail</li>
+                        </ul>
+                    </div>
+                    <div className="roadmap-phase upcoming">
+                        <h3>📊 Fase 4: Analytics (Q4 2025)</h3>
+                        <ul>
+                            <li>Dashboards de KPIs (Taxa de Sucesso, Tempo Médio de Aprovação)</li>
+                            <li>Relatórios de auditoria detalhados</li>
+                        </ul>
+                    </div>
+                </div>
+            </Modal>
+             <Modal
+                isOpen={isCalendarModalOpen}
+                onClose={() => { setIsCalendarModalOpen(false); setEditingDate(null); }}
+                title="Calendário de Mudanças (Out 2025 - Dez 2026)"
+                footer={<button onClick={() => setIsCalendarModalOpen(false)} className="nav-button">Fechar</button>}
+            >
+                {editingDate ? (
+                     <DayEditor 
+                        date={editingDate}
+                        data={calendarData[editingDate]}
+                        onSave={(newData) => {
+                            saveCalendarData(editingDate, newData);
+                            setEditingDate(null);
+                        }}
+                        onClose={() => setEditingDate(null)}
+                    />
+                ) : (
+                    <div className="calendar-container">
+                        <div className="calendar-controls">
+                            <button 
+                                onClick={() => changeMonth(-1)} 
+                                disabled={currentYear === 2025 && currentMonth <= 9} // Disable before Oct 2025
+                                className="nav-button secondary"
+                            >
+                                &lt; Anterior
+                            </button>
+                            <h3>{monthNames[currentMonth]} {currentYear}</h3>
+                            <button 
+                                onClick={() => changeMonth(1)}
+                                disabled={currentYear === 2026 && currentMonth >= 11} // Disable after Dec 2026
+                                className="nav-button secondary"
+                            >
+                                Próximo &gt;
+                            </button>
+                        </div>
+                        
+                        <div className="calendar-legend">
+                            <div className="legend-item"><span className="dot open"></span> Janela Aberta</div>
+                            <div className="legend-item"><span className="dot freeze"></span> Freeze</div>
+                            <div className="legend-item"><span className="dot meeting"></span> Reunião CAB</div>
+                        </div>
+
+                        <div className="calendar-weekdays">
+                            <div>Dom</div><div>Seg</div><div>Ter</div><div>Qua</div><div>Qui</div><div>Sex</div><div>Sáb</div>
+                        </div>
+                        <div className="calendar-grid">
+                            {renderCalendarGrid()}
+                        </div>
+                    </div>
+                )}
             </Modal>
         </div>
     );
@@ -1081,7 +1739,7 @@ const frentesSAPData = {
     "Integrações - CPI", "Manufatura-Tiroleza", "Logística - TM", "Originação - CM", "Originação - ACM",
     "Comercial - SD", "Controladoria - CO", "Suprimentos - MM", "Financeiro - TRM", "Ariba - MM",
     "Guepardo", "Financeiro -FI-AP/AR", "Maxicon", "Financeiro-FI-AA/GL", "Trizzy", "Agrotis",
-    "Manufatura - QM", "Manufatura - PP", "Manufatura - PM"
+    "Manufatura - QM", "Manufatura - PP", "Manufatura - PM", "Fiscal"
   ]
 };
 
@@ -1093,8 +1751,10 @@ interface Anexo {
 
 const initialFormData = {
     informacoesGerais: {
-        liderMudanca: '', solicitante: '', liderProduto: '', dataMudanca: '', motivoMudanca: '',
+        liderMudanca: '', solicitante: '', liderProduto: '', dataMudanca: '', dataAgendaCAB: '', motivoMudanca: '',
         impactoNaoRealizar: '', classificacao: 'Padrão', 
+        // Emergency Justification Fields
+        motivoEmergencia: '', justificativaEmergencia: '', riscosEmergencia: '', tecnicaEmergencia: '',
         servicosAfetados: [] as string[],
         sistemasAfetados: [] as string[], indisponibilidade: 'Não', indisponibilidadeInicio: '', indisponibilidadeFim: '',
         restricoesMudanca: '',
@@ -1317,6 +1977,13 @@ const NewRequestPage = ({ addRequest, currentUser, onSaveDraft, onAutoSaveDraft 
     const autoSaveTimerRef = useRef(null);
     const statusClearTimerRef = useRef(null);
     
+    // Calendar Picker State
+    const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
+    const [calMonth, setCalMonth] = useState(9); // Oct
+    const [calYear, setCalYear] = useState(2025);
+    const [calendarData, setCalendarData] = useState({});
+    const [selectedDateForTime, setSelectedDateForTime] = useState(null);
+
     const [formData, setFormData] = useState<typeof initialFormData>(() => {
         const getInitialState = () => {
             const newForm = JSON.parse(JSON.stringify(initialFormData));
@@ -1352,6 +2019,16 @@ const NewRequestPage = ({ addRequest, currentUser, onSaveDraft, onAutoSaveDraft 
         return getInitialState();
     });
     
+    // Load calendar data when modal opens
+    useEffect(() => {
+        if (isCalendarModalOpen) {
+            const stored = localStorage.getItem('cab-calendar-data');
+            if (stored) {
+                setCalendarData(JSON.parse(stored));
+            }
+        }
+    }, [isCalendarModalOpen]);
+
     // Effect to set the initial draft ID after component mounts
     useEffect(() => {
         try {
@@ -1433,7 +2110,17 @@ const NewRequestPage = ({ addRequest, currentUser, onSaveDraft, onAutoSaveDraft 
                 if (!informacoesGerais.liderMudanca.trim()) errors.push({ field: 'informacoesGerais_liderMudanca', message: 'O campo "Líder da Mudança" é obrigatório.' });
                 if (!informacoesGerais.solicitante.trim()) errors.push({ field: 'informacoesGerais_solicitante', message: 'O campo "Solicitante" é obrigatório.' });
                 if (!informacoesGerais.dataMudanca) errors.push({ field: 'informacoesGerais_dataMudanca', message: 'O campo "Data da Mudança" é obrigatória.' });
+                if (!informacoesGerais.dataAgendaCAB) errors.push({ field: 'informacoesGerais_dataAgendaCAB', message: 'Selecione uma data na "Agenda CAB".' });
                 if (!informacoesGerais.motivoMudanca.trim()) errors.push({ field: 'informacoesGerais_motivoMudanca', message: 'O campo "Motivo da Mudança" é obrigatório.' });
+                
+                // Emergency Validation
+                if (informacoesGerais.classificacao === 'Emergencial') {
+                    if (!informacoesGerais.motivoEmergencia?.trim()) errors.push({ field: 'informacoesGerais_motivoEmergencia', message: 'Descreva o incidente emergencial (Item 1).' });
+                    if (!informacoesGerais.justificativaEmergencia?.trim()) errors.push({ field: 'informacoesGerais_justificativaEmergencia', message: 'Explique por que não pode aguardar (Item 2).' });
+                    if (!informacoesGerais.riscosEmergencia?.trim()) errors.push({ field: 'informacoesGerais_riscosEmergencia', message: 'Aponte os riscos (Item 3).' });
+                    if (!informacoesGerais.tecnicaEmergencia?.trim()) errors.push({ field: 'informacoesGerais_tecnicaEmergencia', message: 'Justifique a ausência de solução alternativa (Item 4).' });
+                }
+
                 if (informacoesGerais.servicosAfetados.length === 0) errors.push({ field: 'informacoesGerais_servicosAfetados', message: 'Selecione ao menos um "Serviço Afetado".' });
                 if (informacoesGerais.sistemasAfetados.length === 0) errors.push({ field: 'informacoesGerais_sistemasAfetados', message: 'Selecione ao menos um "Sistema Afetado".' });
                 if (informacoesGerais.indisponibilidade === 'Sim') {
@@ -1688,20 +2375,23 @@ const NewRequestPage = ({ addRequest, currentUser, onSaveDraft, onAutoSaveDraft 
         const classification = formData.informacoesGerais.classificacao.toUpperCase();
         const subject = `[CAB] ${classification} - Nova RDM: ${newId} - ${requestTitle}`;
         const bodyParts = [
-            `Uma nova requisição de mudança foi submetida para avaliação do CAB.`,
+            `Prezados,`,
             ``,
-            `Detalhes da Requisição:`,
+            `Segue em anexo o PDF gerado com o detalhamento completo desta Requisição de Mudança.`,
+            ``,
+            `Resumo da Solicitação:`,
             `--------------------------------------------------`,
             `Nº da Requisição: ${newId}`,
             `Título/Motivo: ${requestTitle}`,
             `Solicitante: ${currentUser.name} (${currentUser.email})`,
             `Líder da Mudança: ${formData.informacoesGerais.liderMudanca}`,
             `Data da Mudança: ${formData.informacoesGerais.dataMudanca ? new Date(formData.informacoesGerais.dataMudanca + 'T00:00:00').toLocaleDateString('pt-BR', {timeZone: 'UTC'}) : 'N/A'}`,
+            `Agenda CAB: ${formData.informacoesGerais.dataAgendaCAB}`,
             `Classificação: ${formData.informacoesGerais.classificacao}`,
             `Haverá Indisponibilidade: ${formData.informacoesGerais.indisponibilidade}`,
             `--------------------------------------------------`,
             ``,
-            `Para uma análise completa, por favor, acesse o painel do CAB.`
+            `Aprovação e análise detalhada disponíveis no painel do CAB.`
         ];
         const body = bodyParts.join('\n');
         
@@ -1785,24 +2475,28 @@ const NewRequestPage = ({ addRequest, currentUser, onSaveDraft, onAutoSaveDraft 
                                     )}
                                     {checklistType === 'checklistSAP' && (
                                         <>
-                                            <div className="form-field full-width" style={{marginTop: '1rem'}}>
-                                                <label htmlFor={`docLink_${checklistType}_${originalIndex}`}>Link para Evidências</label>
-                                                <input
-                                                    type="url"
-                                                    id={`docLink_${checklistType}_${originalIndex}`}
-                                                    placeholder="https://exemplo.com/documento"
-                                                    value={currentItem.docLink || ''}
-                                                    onChange={(e) => handleChecklistChange(checklistType, originalIndex, 'docLink', e.target.value)}
-                                                />
-                                            </div>
-                                            <div className="form-field full-width" style={{marginTop: '1rem'}}>
-                                                <label htmlFor={`observacao_${checklistType}_${originalIndex}`}>Observação</label>
-                                                <textarea
-                                                    id={`observacao_${checklistType}_${originalIndex}`}
-                                                    value={currentItem.observacao || ''}
-                                                    onChange={(e) => handleChecklistChange(checklistType, originalIndex, 'observacao', e.target.value)}
-                                                />
-                                            </div>
+                                            {currentItem.answer === 'Sim' && (
+                                                <>
+                                                    <div className="form-field full-width" style={{marginTop: '1rem'}}>
+                                                        <label htmlFor={`docLink_${checklistType}_${originalIndex}`}>Link para Evidências</label>
+                                                        <input
+                                                            type="url"
+                                                            id={`docLink_${checklistType}_${originalIndex}`}
+                                                            placeholder="https://exemplo.com/documento"
+                                                            value={currentItem.docLink || ''}
+                                                            onChange={(e) => handleChecklistChange(checklistType, originalIndex, 'docLink', e.target.value)}
+                                                        />
+                                                    </div>
+                                                    <div className="form-field full-width" style={{marginTop: '1rem'}}>
+                                                        <label htmlFor={`observacao_${checklistType}_${originalIndex}`}>Observação</label>
+                                                        <textarea
+                                                            id={`observacao_${checklistType}_${originalIndex}`}
+                                                            value={currentItem.observacao || ''}
+                                                            onChange={(e) => handleChecklistChange(checklistType, originalIndex, 'observacao', e.target.value)}
+                                                        />
+                                                    </div>
+                                                </>
+                                            )}
                                         </>
                                     )}
                                 </div>
@@ -1819,6 +2513,61 @@ const NewRequestPage = ({ addRequest, currentUser, onSaveDraft, onAutoSaveDraft 
     const maxAttachments = 10;
     const attachmentsCount = formData.anexos.length;
     const canUpload = attachmentsCount < maxAttachments;
+    
+    // Calendar Helpers for Picker
+    const changeCalMonth = (offset) => {
+        let newMonth = calMonth + offset;
+        let newYear = calYear;
+        if (newMonth > 11) { newMonth = 0; newYear++; }
+        else if (newMonth < 0) { newMonth = 11; newYear--; }
+        if (newYear < 2025 || (newYear === 2025 && newMonth < 9) || newYear > 2026) return;
+        setCalMonth(newMonth); setCalYear(newYear);
+    };
+
+    const renderCalendarPicker = () => {
+        const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+        const firstDay = new Date(calYear, calMonth, 1).getDay();
+        const days = [];
+        for (let i = 0; i < firstDay; i++) days.push(<div key={`e${i}`} className="calendar-day empty"></div>);
+        
+        for (let day = 1; day <= daysInMonth; day++) {
+            const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const st = calendarData[dateStr]?.status || 'open';
+            
+            const isEmergency = formData.informacoesGerais.classificacao === 'Emergencial';
+            // If Emergency, any day might be selectable (or at least open/meeting days). 
+            // For simplicity and to match "all times enabled", we allow picking any day.
+            const isSelectable = isEmergency ? true : (st === 'meeting');
+            
+            days.push(
+                <div 
+                    key={day} 
+                    className={`calendar-day day-status-${st} ${!isSelectable ? 'disabled' : ''}`}
+                    onClick={() => { if(isSelectable) setSelectedDateForTime(dateStr); }}
+                    style={{cursor: isSelectable ? 'pointer' : 'not-allowed', opacity: isSelectable ? 1 : 0.5}}
+                >
+                    {day}
+                </div>
+            );
+        }
+        return days;
+    };
+    
+    // Check available slots for the selected date
+    const getAvailableSlotsForDate = (dateStr) => {
+        const isEmergency = formData.informacoesGerais.classificacao === 'Emergencial';
+        
+        if (isEmergency) {
+            return generateTimeSlots(); // Return all slots for Emergency
+        }
+
+        const dayData = calendarData[dateStr];
+        if (dayData && Array.isArray(dayData.slots) && dayData.slots.length > 0) {
+            return dayData.slots;
+        }
+        // If not emergency and no slots configured, return empty to force configuration or contact governance
+        return [];
+    };
 
     return (
         <div className="card">
@@ -1847,6 +2596,8 @@ const NewRequestPage = ({ addRequest, currentUser, onSaveDraft, onAutoSaveDraft 
                         </ul>
                     </div>
                 )}
+                
+                {/* Step Content */}
                 
                 {currentStep === 0 && (
                     <div className="step-content">
@@ -1903,6 +2654,28 @@ const NewRequestPage = ({ addRequest, currentUser, onSaveDraft, onAutoSaveDraft 
                                 <label htmlFor="informacoesGerais_dataMudanca">Data da Mudança</label>
                                 <input type="date" id="informacoesGerais_dataMudanca" name="informacoesGerais_dataMudanca" value={formData.informacoesGerais.dataMudanca} onChange={handleChange} min={minDate} className={validationErrors.some(e => e.field === 'informacoesGerais_dataMudanca') ? 'validation-error-field' : ''} />
                             </div>
+                            <div className="form-field">
+                                <label>Agenda CAB</label>
+                                <div style={{display: 'flex', gap: '8px'}}>
+                                    <input 
+                                        type="text" 
+                                        name="informacoesGerais_dataAgendaCAB" 
+                                        value={formData.informacoesGerais.dataAgendaCAB} 
+                                        readOnly 
+                                        placeholder="Selecione..." 
+                                        className={validationErrors.some(e => e.field === 'informacoesGerais_dataAgendaCAB') ? 'validation-error-field' : ''}
+                                        style={{flexGrow: 1}}
+                                    />
+                                    <button 
+                                        type="button" 
+                                        onClick={() => setIsCalendarModalOpen(true)} 
+                                        className="nav-button secondary" 
+                                        style={{padding: '0.6rem 0.8rem', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.9rem'}}
+                                    >
+                                        <CalendarIcon /> Agenda
+                                    </button>
+                                </div>
+                            </div>
                             <div className="form-field full-width">
                                 <label htmlFor="informacoesGerais_motivoMudanca">Motivo da Mudança</label>
                                 <textarea id="informacoesGerais_motivoMudanca" name="informacoesGerais_motivoMudanca" value={formData.informacoesGerais.motivoMudanca} onChange={handleChange} className={validationErrors.some(e => e.field === 'informacoesGerais_motivoMudanca') ? 'validation-error-field' : ''}></textarea>
@@ -1919,6 +2692,35 @@ const NewRequestPage = ({ addRequest, currentUser, onSaveDraft, onAutoSaveDraft 
                                     <option>Planejada</option>
                                 </select>
                             </div>
+
+                            {formData.informacoesGerais.classificacao === 'Emergencial' && (
+                                <div className="form-field full-width conditional-fields" style={{ display: 'block', backgroundColor: '#fff5f5', padding: '1.5rem', borderRadius: '8px', border: '1px solid #ffc9c9', marginTop: '1rem' }}>
+                                    <h4 style={{ color: '#dc3545', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <AlertIcon /> Justificativa Emergencial
+                                    </h4>
+                                    
+                                    <div className="form-field full-width" style={{marginBottom: '1rem'}}>
+                                        <label htmlFor="informacoesGerais_motivoEmergencia">1. Descreva o incidente que motivou a solicitação emergencial, incluindo o que está acontecendo, quem está sendo afetado, a consequência operacional real e o código do chamado registrado com criticidade alta.</label>
+                                        <textarea id="informacoesGerais_motivoEmergencia" name="informacoesGerais_motivoEmergencia" value={formData.informacoesGerais.motivoEmergencia} onChange={handleChange} className={validationErrors.some(e => e.field === 'informacoesGerais_motivoEmergencia') ? 'validation-error-field' : ''} style={{minHeight: '80px'}}></textarea>
+                                    </div>
+                                    
+                                    <div className="form-field full-width" style={{marginBottom: '1rem'}}>
+                                        <label htmlFor="informacoesGerais_justificativaEmergencia">2. Explique por que a situação não pode aguardar a próxima agenda regular do CAB, apontando os impactos adicionais que ocorreriam caso a mudança fosse postergada.</label>
+                                        <textarea id="informacoesGerais_justificativaEmergencia" name="informacoesGerais_justificativaEmergencia" value={formData.informacoesGerais.justificativaEmergencia} onChange={handleChange} className={validationErrors.some(e => e.field === 'informacoesGerais_justificativaEmergencia') ? 'validation-error-field' : ''} style={{minHeight: '80px'}}></textarea>
+                                    </div>
+                                    
+                                    <div className="form-field full-width" style={{marginBottom: '1rem'}}>
+                                        <label htmlFor="informacoesGerais_riscosEmergencia">3. Aponte os riscos financeiros, de processo, regulatórios ou de continuidade operacional vinculados à não aplicação imediata da mudança.</label>
+                                        <textarea id="informacoesGerais_riscosEmergencia" name="informacoesGerais_riscosEmergencia" value={formData.informacoesGerais.riscosEmergencia} onChange={handleChange} className={validationErrors.some(e => e.field === 'informacoesGerais_riscosEmergencia') ? 'validation-error-field' : ''} style={{minHeight: '80px'}}></textarea>
+                                    </div>
+                                    
+                                    <div className="form-field full-width">
+                                        <label htmlFor="informacoesGerais_tecnicaEmergencia">4. Justifique tecnicamente a ausência de solução alternativa, demonstrando que a causa foi entendida e que a intervenção proposta é a única abordagem viável no momento.</label>
+                                        <textarea id="informacoesGerais_tecnicaEmergencia" name="informacoesGerais_tecnicaEmergencia" value={formData.informacoesGerais.tecnicaEmergencia} onChange={handleChange} className={validationErrors.some(e => e.field === 'informacoesGerais_tecnicaEmergencia') ? 'validation-error-field' : ''} style={{minHeight: '80px'}}></textarea>
+                                    </div>
+                                </div>
+                            )}
+
                              <div className="form-field">
                                 <label htmlFor="informacoesGerais_restricoesMudanca">Existem restrições para a realização da mudança?</label>
                                 <input type="text" id="informacoesGerais_restricoesMudanca" name="informacoesGerais_restricoesMudanca" value={formData.informacoesGerais.restricoesMudanca} onChange={handleChange} />
@@ -1979,924 +2781,265 @@ const NewRequestPage = ({ addRequest, currentUser, onSaveDraft, onAutoSaveDraft 
                         </div>
                     </div>
                 )}
-                
                 {currentStep === 1 && (
                     <div className="step-content">
-                        <h2>
-                            {steps[1]}
-                            <Tooltip text="Detalhe todas as atividades necessárias para a implantação da mudança, desde a preparação até a finalização." />
-                        </h2>
-                        {validationErrors.some(e => e.table === 'planoImplantacao') && (
-                            <p className="table-error-message">
-                                <AlertIcon /> {validationErrors.find(e => e.table === 'planoImplantacao')?.message}
-                            </p>
-                        )}
+                        <h2>{steps[1]}</h2>
                         <div className="implementation-plan-list">
-                            {formData.planoImplantacao.length > 0 ? (
-                                formData.planoImplantacao.map((item, index) => (
-                                    <div key={item.id || index} className="implementation-card">
-                                        <div className="implementation-card-header">
-                                            <h4>Atividade #{index + 1}: {item.nome || 'Nova Atividade'}</h4>
-                                            <button
-                                                type="button"
-                                                onClick={() => removeRow('planoImplantacao', index)}
-                                                className="action-button remove-row-btn"
-                                                title="Remover Atividade"
-                                            >
-                                                <TrashIcon />
-                                            </button>
-                                        </div>
-                                        <div className="form-grid implementation-card-grid">
-                                            <div className="form-field full-width">
-                                                <label htmlFor={`planoImplantacao_${index}_nome`}>
-                                                    Nome da Atividade
-                                                    <Tooltip text="Nome claro e objetivo para a atividade." />
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    id={`planoImplantacao_${index}_nome`}
-                                                    value={item.nome || ''}
-                                                    onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'nome', e.target.value)}
-                                                    className={validationErrors.some(e => e.field === `planoImplantacao_${index}_nome`) ? 'validation-error-field' : ''}
-                                                />
-                                            </div>
-
-                                            <div className="form-field">
-                                                <label htmlFor={`planoImplantacao_${index}_etapa`}>
-                                                    Etapa
-                                                    <Tooltip text="Fase da implantação (ex: Pré-implantação, Execução, Pós-implantação)." />
-                                                </label>
-                                                <select
-                                                    id={`planoImplantacao_${index}_etapa`}
-                                                    value={item.etapa || 'Pré Implantação'}
-                                                    onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'etapa', e.target.value)}
-                                                >
-                                                    <option>Pré Implantação</option>
-                                                    <option>Implantação</option>
-                                                    <option>Pós Implantação</option>
-                                                </select>
-                                            </div>
-
-                                            <div className="form-field">
-                                                <label htmlFor={`planoImplantacao_${index}_status`}>
-                                                    Status
-                                                    <Tooltip text="Status atual da atividade." />
-                                                </label>
-                                                <input type="text" id={`planoImplantacao_${index}_status`} value={item.status || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'status', e.target.value)} />
-                                            </div>
-
-                                            <div className="form-field">
-                                                <label htmlFor={`planoImplantacao_${index}_dataPlanejada`}>
-                                                    Data Planejada
-                                                    <Tooltip text="Data em que a atividade deve ser executada." />
-                                                </label>
-                                                <input
-                                                    type="date"
-                                                    placeholder="dd/mm/aaaa"
-                                                    id={`planoImplantacao_${index}_dataPlanejada`}
-                                                    min={minDate}
-                                                    value={item.dataPlanejada || ''}
-                                                    onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'dataPlanejada', e.target.value)}
-                                                    className={validationErrors.some(e => e.field === `planoImplantacao_${index}_dataPlanejada`) ? 'validation-error-field' : ''}
-                                                />
-                                            </div>
-                                            
-                                            <div className="form-field">
-                                                <label htmlFor={`planoImplantacao_${index}_horaPlanejada`}>
-                                                    Hora Planejada
-                                                    <Tooltip text="Horário planejado para a execução." />
-                                                </label>
-                                                <input
-                                                    type="time"
-                                                    id={`planoImplantacao_${index}_horaPlanejada`}
-                                                    value={item.horaPlanejada || ''}
-                                                    onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'horaPlanejada', e.target.value)}
-                                                />
-                                            </div>
-
-                                            <div className="form-field full-width">
-                                                <label htmlFor={`planoImplantacao_${index}_descricao`}>
-                                                    Descrição
-                                                    <Tooltip text="Descrição detalhada dos passos a serem executados na atividade." />
-                                                </label>
-                                                <textarea
-                                                    id={`planoImplantacao_${index}_descricao`}
-                                                    value={item.descricao || ''}
-                                                    onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'descricao', e.target.value)}
-                                                />
-                                            </div>
-
-                                            <div className="form-field">
-                                                <label htmlFor={`planoImplantacao_${index}_responsavel`}>
-                                                    Responsável
-                                                    <Tooltip text="Pessoa ou equipe responsável pela execução." />
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    id={`planoImplantacao_${index}_responsavel`}
-                                                    value={item.responsavel || ''}
-                                                    onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'responsavel', e.target.value)}
-                                                    className={validationErrors.some(e => e.field === `planoImplantacao_${index}_responsavel`) ? 'validation-error-field' : ''}
-                                                />
-                                            </div>
-                                            
-                                            <div className="form-field">
-                                                <label htmlFor={`planoImplantacao_${index}_departamento`}>
-                                                    Departamento
-                                                    <Tooltip text="Departamento do responsável." />
-                                                </label>
-                                                <input type="text" id={`planoImplantacao_${index}_departamento`} value={item.departamento || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'departamento', e.target.value)} />
-                                            </div>
-
-                                            <div className="form-field">
-                                                <label htmlFor={`planoImplantacao_${index}_itemConfiguracao`}>
-                                                    Item de Configuração
-                                                    <Tooltip text="Ativo ou componente de infraestrutura afetado (ex: Servidor, Aplicação)." />
-                                                </label>
-                                                <input type="text" id={`planoImplantacao_${index}_itemConfiguracao`} value={item.itemConfiguracao || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'itemConfiguracao', e.target.value)} />
-                                            </div>
-
-                                            <div className="form-field">
-                                                <label htmlFor={`planoImplantacao_${index}_tempoExecucao`}>
-                                                    Tempo de Execução
-                                                    <Tooltip text="Tempo estimado para a conclusão da atividade (formato HH:MM)." />
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    id={`planoImplantacao_${index}_tempoExecucao`}
-                                                    placeholder="Ex: 01:15"
-                                                    value={item.tempoExecucao || ''}
-                                                    onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'tempoExecucao', e.target.value)}
-                                                />
-                                            </div>
-                                        </div>
+                            {formData.planoImplantacao.map((item, index) => (
+                                <div key={item.id || index} className="implementation-card">
+                                    <div className="implementation-card-header">
+                                        <h4>Atividade #{index + 1}: {item.nome || 'Nova Atividade'}</h4>
+                                        <button type="button" onClick={() => removeRow('planoImplantacao', index)} className="action-button remove-row-btn"><TrashIcon /></button>
                                     </div>
-                                ))
-                            ) : (
-                                <p className="empty-state-message">Nenhuma atividade adicionada.</p>
-                            )}
+                                    <div className="form-grid implementation-card-grid">
+                                        {/* Activity Fields */}
+                                        <div className="form-field full-width">
+                                            <label>Nome da Atividade</label>
+                                            <input type="text" value={item.nome || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'nome', e.target.value)} />
+                                        </div>
+                                        <div className="form-field">
+                                            <label>Etapa</label>
+                                            <select value={item.etapa || 'Pré Implantação'} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'etapa', e.target.value)}>
+                                                <option>Pré Implantação</option><option>Implantação</option><option>Pós Implantação</option>
+                                            </select>
+                                        </div>
+                                        <div className="form-field"><label>Status</label><input type="text" value={item.status || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'status', e.target.value)} /></div>
+                                        <div className="form-field"><label>Data Planejada</label><input type="date" value={item.dataPlanejada || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'dataPlanejada', e.target.value)} /></div>
+                                        <div className="form-field"><label>Hora Planejada</label><input type="time" value={item.horaPlanejada || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'horaPlanejada', e.target.value)} /></div>
+                                        <div className="form-field full-width"><label>Descrição</label><textarea value={item.descricao || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'descricao', e.target.value)} /></div>
+                                        <div className="form-field"><label>Responsável</label><input type="text" value={item.responsavel || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'responsavel', e.target.value)} /></div>
+                                        <div className="form-field"><label>Departamento</label><input type="text" value={item.departamento || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'departamento', e.target.value)} /></div>
+                                        <div className="form-field"><label>Item Configuração</label><input type="text" value={item.itemConfiguracao || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'itemConfiguracao', e.target.value)} /></div>
+                                        <div className="form-field"><label>Tempo Execução</label><input type="text" value={item.tempoExecucao || ''} onChange={(e) => handleDynamicTableChange('planoImplantacao', index, 'tempoExecucao', e.target.value)} /></div>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
-                        <button
-                            type="button"
-                            onClick={() => addRow('planoImplantacao', { nome: '', etapa: 'Pré Implantação', status: '', dataPlanejada: '', horaPlanejada: '', descricao: '', responsavel: '', departamento: '', itemConfiguracao: '', tempoExecucao: '' })}
-                            className="submit-btn add-row-btn"
-                        >
-                            + Adicionar Atividade
-                        </button>
+                         <button type="button" onClick={() => addRow('planoImplantacao', { nome: '', etapa: 'Pré Implantação', status: '', dataPlanejada: '', horaPlanejada: '', descricao: '', responsavel: '', departamento: '', itemConfiguracao: '', tempoExecucao: '' })} className="submit-btn add-row-btn">+ Adicionar Atividade</button>
                     </div>
                 )}
-
-                {currentStep === 2 && formData.informacoesGerais.referenteSAP === 'Sim' && (
+                 {currentStep === 2 && formData.informacoesGerais.referenteSAP === 'Sim' && (
                      <div className="step-content">
                         <h2>{steps[2]}</h2>
-                        {validationErrors.some(e => e.table === 'mapaTransporte') && (
-                            <p className="table-error-message">
-                                <AlertIcon /> {validationErrors.find(e => e.table === 'mapaTransporte')?.message}
-                            </p>
-                        )}
                          <div className="implementation-plan-list">
-                            {formData.mapaTransporte.length > 0 ? (
-                                formData.mapaTransporte.map((item, index) => (
-                                    <div key={item.id || index} className="implementation-card">
-                                        <div className="implementation-card-header">
-                                            <h4>Request #{index + 1}: {item.request || 'Nova Request'}</h4>
-                                            <button onClick={() => removeRow('mapaTransporte', index)} className="action-button remove-row-btn" title="Remover Request"><TrashIcon /></button>
-                                        </div>
-                                        <div className="form-grid implementation-card-grid">
-                                            <div className="form-field">
-                                                <label>ID da Request</label>
-                                                <input type="text" value={item.request || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'request', e.target.value)} className={validationErrors.some(e => e.field === `mapaTransporte_${index}_request`) ? 'validation-error-field' : ''} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Sequenciamento</label>
-                                                <input type="text" value={item.sequenciamento || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'sequenciamento', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Tipo Request</label>
-                                                <select value={item.tipoRequest || 'Workbench'} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'tipoRequest', e.target.value)}>
-                                                    <option>Workbench</option><option>Customizing</option><option>Transport of Copies</option><option>Nota SAP/Support Package</option>
-                                                </select>
-                                            </div>
-                                            <div className="form-field full-width">
-                                                <label>Objetivo</label>
-                                                <input type="text" value={item.objetivoRequest || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'objetivoRequest', e.target.value)} className={validationErrors.some(e => e.field === `mapaTransporte_${index}_objetivoRequest`) ? 'validation-error-field' : ''} />
-                                            </div>
-                                            <div className="form-field full-width">
-                                                <label>Descrição Técnica</label>
-                                                <textarea value={item.descricaoTecnica || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'descricaoTecnica', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Tipo</label>
-                                                <select value={item.tipo || 'Normal'} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'tipo', e.target.value)}>
-                                                    <option>Normal</option><option>Normal c/ Erro</option><option>Crítica</option><option>Crítica c/ Erro</option><option>Emergencial</option>
-                                                </select>
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Nº CALM/Jira</label>
-                                                <input type="text" value={item.numeroCALM || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'numeroCALM', e.target.value)} />
-                                            </div>
-                                             <div className="form-field">
-                                                <label>GO - SIPAL</label>
-                                                <input type="text" value={item.goSipal || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'goSipal', e.target.value)} />
-                                            </div>
-                                             <div className="form-field">
-                                                <label>Status</label>
-                                                <select value={item.status || 'Liberado para Transporte'} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'status', e.target.value)}>
-                                                    <option>Liberado para Transporte</option><option>Aguardando Aprovação</option><option>Transportado</option><option>Com Erro</option>
-                                                </select>
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Data Criação</label>
-                                                <input type="date" value={item.dataCriacao || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'dataCriacao', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Resp. Criação</label>
-                                                <input type="text" value={item.responsavelCriacao || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'responsavelCriacao', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Resp. Importação</label>
-                                                <input type="text" value={item.responsavelImportacao || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'responsavelImportacao', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Solicitante</label>
-                                                <input type="text" value={item.solicitante || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'solicitante', e.target.value)} />
-                                            </div>
-                                            <div className="form-field full-width">
-                                                <label>Link Evid. Teste</label>
-                                                <input type="text" value={item.evidenciaTeste || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'evidenciaTeste', e.target.value)} />
-                                            </div>
-                                             <div className="form-field full-width">
-                                                <label>Plano Rollback</label>
-                                                <textarea value={item.planoRollback || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'planoRollback', e.target.value)} />
-                                            </div>
-                                            <div className="form-field full-width">
-                                                <label>Observações</label>
-                                                <textarea value={item.observacoes || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'observacoes', e.target.value)} />
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))
-                            ) : <p className="empty-state-message">Nenhuma request adicionada.</p>}
-                        </div>
-                        <button type="button" onClick={() => addRow('mapaTransporte', { request: '', sequenciamento: '', tipoRequest: 'Workbench', objetivoRequest: '', descricaoTecnica: '', tipo: 'Normal', numeroCALM: '', goSipal: '', status: 'Liberado para Transporte', dataCriacao: '', responsavelCriacao: '', responsavelImportacao: '', solicitante: '', evidenciaTeste: '', planoRollback: '', observacoes: '' })} className="submit-btn add-row-btn">+ Adicionar Request</button>
-                    </div>
-                )}
-                
-                {currentStep === 3 && (
-                    <div className="step-content">
-                        <h2>
-                            {steps[3]}
-                            <Tooltip text="Descreva os casos de teste para validar a mudança." />
-                        </h2>
-                        {validationErrors.some(e => e.table === 'cadernoTestes') && (
-                            <p className="table-error-message">
-                                <AlertIcon /> {validationErrors.find(e => e.table === 'cadernoTestes')?.message}
-                            </p>
-                        )}
-                        <div className="implementation-plan-list">
-                             {formData.cadernoTestes.length > 0 ? (
-                                formData.cadernoTestes.map((item, index) => (
-                                    <div key={item.id || index} className="implementation-card">
-                                        <div className="implementation-card-header">
-                                            <h4>Teste #{index + 1}: {item.nome || 'Novo Teste'}</h4>
-                                            <button
-                                                type="button"
-                                                onClick={() => removeRow('cadernoTestes', index)}
-                                                className="action-button remove-row-btn"
-                                                title="Remover Teste"
-                                            >
-                                                <TrashIcon />
-                                            </button>
-                                        </div>
-                                        <div className="form-grid implementation-card-grid">
-                                            <div className="form-field full-width">
-                                                <label htmlFor={`cadernoTestes_${index}_nome`}>
-                                                    Nome do Teste
-                                                    <Tooltip text="Nome descritivo do caso de teste." />
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    id={`cadernoTestes_${index}_nome`}
-                                                    value={item.nome || ''}
-                                                    onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'nome', e.target.value)}
-                                                    className={validationErrors.some(e => e.field === `cadernoTestes_${index}_nome`) ? 'validation-error-field' : ''}
-                                                />
-                                            </div>
-                                            
-                                            <div className="form-field">
-                                                <label htmlFor={`cadernoTestes_${index}_plano`}>
-                                                    Plano
-                                                    <Tooltip text="Plano de teste associado." />
-                                                </label>
-                                                 <select
-                                                    id={`cadernoTestes_${index}_plano`}
-                                                    value={item.plano || ''}
-                                                    onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'plano', e.target.value)}
-                                                >
-                                                    <option value="" disabled>Selecione...</option>
-                                                    <option>Funcional</option>
-                                                    <option>Não Funcional</option>
-                                                    <option>Regressivo</option>
-                                                    <option>UAT (User Acceptance Testing)</option>
-                                                </select>
-                                            </div>
-
-                                            <div className="form-field">
-                                                <label htmlFor={`cadernoTestes_${index}_tipoTeste`}>
-                                                    Tipo de Teste
-                                                    <Tooltip text="Categoria do teste." />
-                                                </label>
-                                                <select
-                                                    id={`cadernoTestes_${index}_tipoTeste`}
-                                                    value={item.tipoTeste || 'TU - Teste Unitário'}
-                                                    onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'tipoTeste', e.target.value)}
-                                                >
-                                                    <option>TU - Teste Unitário</option>
-                                                    <option>TI - Teste Integrado</option>
-                                                    <option>TH - Teste de Homologação</option>
-                                                    <option>TR - Teste Regressivo</option>
-                                                    <option>TS - Teste de Segurança</option>
-                                                    <option>TP - Teste de Performance</option>
-                                                </select>
-                                            </div>
-
-                                            <div className="form-field">
-                                                <label htmlFor={`cadernoTestes_${index}_dataPlanejada`}>
-                                                    Data Planejada
-                                                    <Tooltip text="Data prevista para execução do teste." />
-                                                </label>
-                                                <input
-                                                    type="date"
-                                                    id={`cadernoTestes_${index}_dataPlanejada`}
-                                                    min={minDate}
-                                                    value={item.dataPlanejada || ''}
-                                                    onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'dataPlanejada', e.target.value)}
-                                                />
-                                            </div>
-                                            
-                                            <div className="form-field">
-                                                <label htmlFor={`cadernoTestes_${index}_horaPlanejada`}>
-                                                    Hora Planejada
-                                                    <Tooltip text="Horário previsto." />
-                                                </label>
-                                                <input
-                                                    type="time"
-                                                    id={`cadernoTestes_${index}_horaPlanejada`}
-                                                    value={item.horaPlanejada || ''}
-                                                    onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'horaPlanejada', e.target.value)}
-                                                />
-                                            </div>
-                                            
-                                            <div className="form-field full-width">
-                                                <label htmlFor={`cadernoTestes_${index}_atividade`}>
-                                                    Atividade de Teste
-                                                    <Tooltip text="Passos ou descrição detalhada do teste a ser realizado." />
-                                                </label>
-                                                <textarea
-                                                    id={`cadernoTestes_${index}_atividade`}
-                                                    value={item.atividade || ''}
-                                                    onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'atividade', e.target.value)}
-                                                />
-                                            </div>
-                                            
-                                            <div className="form-field full-width">
-                                                <label htmlFor={`cadernoTestes_${index}_linkTeste`}>
-                                                    Link do Teste
-                                                    <Tooltip text="Link para evidência, script ou ferramenta de teste." />
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    placeholder="Cole o link para a evidência do teste"
-                                                    id={`cadernoTestes_${index}_linkTeste`}
-                                                    value={item.linkTeste || ''}
-                                                    onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'linkTeste', e.target.value)}
-                                                />
-                                            </div>
-
-                                            <div className="form-field">
-                                                <label htmlFor={`cadernoTestes_${index}_predecessora`}>
-                                                    Predecessora
-                                                    <Tooltip text="Atividade ou teste que deve ser concluído antes deste." />
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    id={`cadernoTestes_${index}_predecessora`}
-                                                    value={item.predecessora || ''}
-                                                    onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'predecessora', e.target.value)}
-                                                />
-                                            </div>
-
-                                            <div className="form-field">
-                                                <label htmlFor={`cadernoTestes_${index}_responsavel`}>
-                                                    Responsável
-                                                    <Tooltip text="Quem executará o teste." />
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    id={`cadernoTestes_${index}_responsavel`}
-                                                    value={item.responsavel || ''}
-                                                    onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'responsavel', e.target.value)}
-                                                    className={validationErrors.some(e => e.field === `cadernoTestes_${index}_responsavel`) ? 'validation-error-field' : ''}
-                                                />
-                                            </div>
-
-                                            <div className="form-field">
-                                                <label htmlFor={`cadernoTestes_${index}_departamento`}>
-                                                    Departamento
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    id={`cadernoTestes_${index}_departamento`}
-                                                    value={item.departamento || ''}
-                                                    onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'departamento', e.target.value)}
-                                                />
-                                            </div>
-
-                                            <div className="form-field">
-                                                <label htmlFor={`cadernoTestes_${index}_itemConfiguracao`}>
-                                                    Item de Configuração
-                                                    <Tooltip text="Sistema ou módulo testado." />
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    id={`cadernoTestes_${index}_itemConfiguracao`}
-                                                    value={item.itemConfiguracao || ''}
-                                                    onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'itemConfiguracao', e.target.value)}
-                                                />
-                                            </div>
-
-                                            <div className="form-field">
-                                                <label htmlFor={`cadernoTestes_${index}_tempoExecucao`}>
-                                                    Tempo de Execução
-                                                    <Tooltip text="Duração estimada (HH:MM)." />
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    placeholder="Ex: 02:30"
-                                                    id={`cadernoTestes_${index}_tempoExecucao`}
-                                                    value={item.tempoExecucao || ''}
-                                                    onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'tempoExecucao', e.target.value)}
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))
-                            ) : (
-                                <p className="empty-state-message">Nenhum teste adicionado.</p>
-                            )}
-                        </div>
-                        <button
-                            type="button"
-                             onClick={() => addRow('cadernoTestes', { nome: '', plano: '', tipoTeste: 'TU - Teste Unitário', dataPlanejada: '', horaPlanejada: '', atividade: '', linkTeste: '', predecessora: '', responsavel: '', departamento: '', itemConfiguracao: '', tempoExecucao: '' })}
-                            className="submit-btn add-row-btn"
-                        >
-                            + Adicionar Teste
-                        </button>
-                    </div>
-                )}
-                
-                {currentStep === 4 && (
-                    <div className="step-content">
-                        <h2>{steps[4]}</h2>
-                        {validationErrors.some(e => e.table === 'planoRetorno') && (
-                            <p className="table-error-message">
-                                <AlertIcon /> {validationErrors.find(e => e.table === 'planoRetorno')?.message}
-                            </p>
-                        )}
-                         <div className="implementation-plan-list">
-                            {formData.planoRetorno.length > 0 ? (
-                                formData.planoRetorno.map((item, index) => (
-                                    <div key={item.id || index} className="implementation-card">
-                                        <div className="implementation-card-header">
-                                            <h4>Atividade #{index + 1}</h4>
-                                            <button onClick={() => removeRow('planoRetorno', index)} className="action-button remove-row-btn" title="Remover Atividade"><TrashIcon /></button>
-                                        </div>
-                                        <div className="form-grid implementation-card-grid">
-                                            <div className="form-field">
-                                                <label>Data Planejada</label>
-                                                <input type="date" value={item.dataPlanejada || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'dataPlanejada', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Hora Planejada</label>
-                                                <input type="time" value={item.horaPlanejada || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'horaPlanejada', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Status</label>
-                                                <select value={item.status || 'Não iniciado'} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'status', e.target.value)}>
-                                                    <option>Não iniciado</option><option>Em andamento</option><option>Concluído</option><option>Com problema</option>
-                                                </select>
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Data Realizada</label>
-                                                <input type="date" value={item.dataRealizada || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'dataRealizada', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Hora Realizada</label>
-                                                <input type="time" value={item.horaRealizada || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'horaRealizada', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Tipo</label>
-                                                <select value={item.tipo || 'Manual'} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'tipo', e.target.value)}>
-                                                    <option>Automático</option><option>Manual</option>
-                                                </select>
-                                            </div>
-                                            <div className="form-field full-width">
-                                                <label>Descrição</label>
-                                                <textarea value={item.descricao || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'descricao', e.target.value)} className={validationErrors.some(e => e.field === `planoRetorno_${index}_descricao`) ? 'validation-error-field' : ''} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Predecessora</label>
-                                                <input type="text" value={item.predecessora || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'predecessora', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Responsável</label>
-                                                <input type="text" value={item.responsavel || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'responsavel', e.target.value)} className={validationErrors.some(e => e.field === `planoRetorno_${index}_responsavel`) ? 'validation-error-field' : ''} />
-                                            </div>
-                                            <div className="form-field full-width">
-                                                <label>Observação</label>
-                                                <textarea value={item.observacao || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'observacao', e.target.value)} />
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))
-                            ) : <p className="empty-state-message">Nenhuma atividade adicionada.</p>}
-                        </div>
-                        <button type="button" onClick={() => addRow('planoRetorno', { dataPlanejada: '', horaPlanejada: '', status: 'Não iniciado', dataRealizada: '', horaRealizada: '', tipo: 'Manual', descricao: '', predecessora: '', responsavel: '', observacao: '' })} className="submit-btn add-row-btn">+ Adicionar Atividade</button>
-                    </div>
-                )}
-
-                {currentStep === 5 && (
-                    <div className="step-content">
-                         <h2>{steps[5]}</h2>
-                         <div className="card-like-section">
-                             <div className="form-grid">
-                                <div className="form-field">
-                                    <label htmlFor="comunicacaoChecklist_partesEnvolvidasValidaram">Partes envolvidas validaram o plano?</label>
-                                    <div className="radio-group">
-                                        <label className="radio-label"><input type="radio" name="comunicacaoChecklist_partesEnvolvidasValidaram" value="Sim" checked={formData.comunicacaoChecklist.partesEnvolvidasValidaram === 'Sim'} onChange={handleChange} /> Sim</label>
-                                        <label className="radio-label"><input type="radio" name="comunicacaoChecklist_partesEnvolvidasValidaram" value="Não" checked={formData.comunicacaoChecklist.partesEnvolvidasValidaram === 'Não'} onChange={handleChange} /> Não</label>
+                            {formData.mapaTransporte.map((item, index) => (
+                                <div key={item.id || index} className="implementation-card">
+                                    <div className="implementation-card-header"><h4>Request #{index+1}</h4><button type="button" onClick={() => removeRow('mapaTransporte', index)} className="action-button remove-row-btn"><TrashIcon /></button></div>
+                                    <div className="form-grid implementation-card-grid">
+                                        <div className="form-field"><label>ID Request</label><input type="text" value={item.request || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'request', e.target.value)} /></div>
+                                        <div className="form-field"><label>Sequenciamento</label><input type="text" value={item.sequenciamento || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'sequenciamento', e.target.value)} /></div>
+                                        <div className="form-field"><label>Tipo Request</label><input type="text" value={item.tipoRequest || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'tipoRequest', e.target.value)} /></div>
+                                        <div className="form-field full-width"><label>Objetivo</label><input type="text" value={item.objetivoRequest || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'objetivoRequest', e.target.value)} /></div>
+                                        <div className="form-field full-width"><label>Descrição Técnica</label><textarea value={item.descricaoTecnica || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'descricaoTecnica', e.target.value)} /></div>
+                                        <div className="form-field"><label>Tipo</label><input type="text" value={item.tipo || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'tipo', e.target.value)} /></div>
+                                        <div className="form-field"><label>Número CALM/Jira</label><input type="text" value={item.numeroCALM || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'numeroCALM', e.target.value)} /></div>
+                                        <div className="form-field"><label>GO - SIPAL</label><input type="text" value={item.goSipal || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'goSipal', e.target.value)} /></div>
+                                        <div className="form-field"><label>Status</label><input type="text" value={item.status || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'status', e.target.value)} /></div>
+                                        <div className="form-field"><label>Data Criação</label><input type="date" value={item.dataCriacao || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'dataCriacao', e.target.value)} /></div>
+                                        <div className="form-field"><label>Resp. Criação</label><input type="text" value={item.responsavelCriacao || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'responsavelCriacao', e.target.value)} /></div>
+                                        <div className="form-field"><label>Resp. Importação</label><input type="text" value={item.responsavelImportacao || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'responsavelImportacao', e.target.value)} /></div>
+                                        <div className="form-field"><label>Solicitante</label><input type="text" value={item.solicitante || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'solicitante', e.target.value)} /></div>
+                                        <div className="form-field"><label>Evidência Teste</label><input type="text" value={item.evidenciaTeste || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'evidenciaTeste', e.target.value)} /></div>
+                                        <div className="form-field full-width"><label>Plano Rollback</label><textarea value={item.planoRollback || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'planoRollback', e.target.value)} /></div>
+                                        <div className="form-field full-width"><label>Observações</label><textarea value={item.observacoes || ''} onChange={(e) => handleDynamicTableChange('mapaTransporte', index, 'observacoes', e.target.value)} /></div>
                                     </div>
                                 </div>
-                                <div className="form-field">
-                                    <label htmlFor="comunicacaoChecklist_processoAcompanhamentoComunicado">Processo de acompanhamento comunicado?</label>
-                                    <div className="radio-group">
-                                        <label className="radio-label"><input type="radio" name="comunicacaoChecklist_processoAcompanhamentoComunicado" value="Sim" checked={formData.comunicacaoChecklist.processoAcompanhamentoComunicado === 'Sim'} onChange={handleChange} /> Sim</label>
-                                        <label className="radio-label"><input type="radio" name="comunicacaoChecklist_processoAcompanhamentoComunicado" value="Não" checked={formData.comunicacaoChecklist.processoAcompanhamentoComunicado === 'Não'} onChange={handleChange} /> Não</label>
-                                    </div>
-                                </div>
-                                <div className="form-field">
-                                    <label htmlFor="comunicacaoChecklist_comunicacaoEventoRetorno">Comunicação de retorno contemplada?</label>
-                                    <div className="radio-group">
-                                        <label className="radio-label"><input type="radio" name="comunicacaoChecklist_comunicacaoEventoRetorno" value="Sim" checked={formData.comunicacaoChecklist.comunicacaoEventoRetorno === 'Sim'} onChange={handleChange} /> Sim</label>
-                                        <label className="radio-label"><input type="radio" name="comunicacaoChecklist_comunicacaoEventoRetorno" value="Não" checked={formData.comunicacaoChecklist.comunicacaoEventoRetorno === 'Não'} onChange={handleChange} /> Não</label>
-                                    </div>
-                                </div>
-                                <div className="form-field">
-                                    <label htmlFor="comunicacaoChecklist_passoAPassoAplicacao">Passo a passo para aplicação existe?</label>
-                                    <div className="radio-group">
-                                        <label className="radio-label"><input type="radio" name="comunicacaoChecklist_passoAPassoAplicacao" value="Sim" checked={formData.comunicacaoChecklist.passoAPassoAplicacao === 'Sim'} onChange={handleChange} /> Sim</label>
-                                        <label className="radio-label"><input type="radio" name="comunicacaoChecklist_passoAPassoAplicacao" value="Não" checked={formData.comunicacaoChecklist.passoAPassoAplicacao === 'Não'} onChange={handleChange} /> Não</label>
-                                    </div>
-                                </div>
-                                 <div className="form-field">
-                                    <label htmlFor="comunicacaoChecklist_tabelaContatosPreenchida">Tabela de contatos preenchida?</label>
-                                    <div className="radio-group">
-                                        <label className="radio-label"><input type="radio" name="comunicacaoChecklist_tabelaContatosPreenchida" value="Sim" checked={formData.comunicacaoChecklist.tabelaContatosPreenchida === 'Sim'} onChange={handleChange} /> Sim</label>
-                                        <label className="radio-label"><input type="radio" name="comunicacaoChecklist_tabelaContatosPreenchida" value="Não" checked={formData.comunicacaoChecklist.tabelaContatosPreenchida === 'Não'} onChange={handleChange} /> Não</label>
-                                    </div>
-                                </div>
-                                <div className="form-field">
-                                    <label htmlFor="comunicacaoChecklist_pontosFocaisInformados">Pontos focais informados?</label>
-                                    <div className="radio-group">
-                                        <label className="radio-label"><input type="radio" name="comunicacaoChecklist_pontosFocaisInformados" value="Sim" checked={formData.comunicacaoChecklist.pontosFocaisInformados === 'Sim'} onChange={handleChange} /> Sim</label>
-                                        <label className="radio-label"><input type="radio" name="comunicacaoChecklist_pontosFocaisInformados" value="Não" checked={formData.comunicacaoChecklist.pontosFocaisInformados === 'Não'} onChange={handleChange} /> Não</label>
-                                    </div>
-                                </div>
-                             </div>
+                            ))}
                          </div>
-                         
-                         <h3>Detalhamento da Comunicação</h3>
-                          <div className="implementation-plan-list">
-                             {formData.planoComunicacao.length > 0 ? (
-                                formData.planoComunicacao.map((item, index) => (
-                                    <div key={item.id || index} className="implementation-card">
-                                        <div className="implementation-card-header">
-                                            <h4>Item #{index + 1}</h4>
-                                            <button onClick={() => removeRow('planoComunicacao', index)} className="action-button remove-row-btn"><TrashIcon /></button>
-                                        </div>
-                                        <div className="form-grid implementation-card-grid">
-                                            <div className="form-field">
-                                                <label>Data</label>
-                                                <input type="date" value={item.data || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'data', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Hora</label>
-                                                <input type="time" value={item.hora || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'hora', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Status</label>
-                                                <input type="text" value={item.status || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'status', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Meio</label>
-                                                <select value={item.meio || 'E-mail'} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'meio', e.target.value)}>
-                                                    <option>E-mail</option><option>Teams</option><option>Telefone</option><option>Reunião</option>
-                                                </select>
-                                            </div>
-                                            <div className="form-field full-width">
-                                                <label>Atividade/Público</label>
-                                                <input type="text" value={item.atividade || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'atividade', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Responsável</label>
-                                                <input type="text" value={item.responsavel || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'responsavel', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Contato Escalonamento</label>
-                                                <input type="text" value={item.contatoEscalonamento || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'contatoEscalonamento', e.target.value)} />
-                                            </div>
-                                            <div className="form-field full-width">
-                                                <label>Observação</label>
-                                                <textarea value={item.observacao || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'observacao', e.target.value)} />
+                         <button type="button" onClick={() => addRow('mapaTransporte', {})} className="submit-btn add-row-btn">+ Adicionar Request</button>
+                     </div>
+                 )}
+                 {(currentStep >= 3 && currentStep <= 11) && (
+                     <div className="step-content">
+                        <h2>{steps[currentStep]}</h2>
+                         {currentStep === 3 && (
+                             <>
+                                <div className="implementation-plan-list">
+                                    {formData.cadernoTestes.map((item, index) => (
+                                        <div key={index} className="implementation-card">
+                                            <div className="implementation-card-header"><h4>Teste #{index+1}</h4><button type="button" onClick={() => removeRow('cadernoTestes', index)} className="action-button remove-row-btn"><TrashIcon /></button></div>
+                                            <div className="form-grid implementation-card-grid">
+                                                 <div className="form-field full-width"><label>Nome Teste</label><input type="text" value={item.nome || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'nome', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Plano</label><input type="text" value={item.plano || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'plano', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Tipo Teste</label><input type="text" value={item.tipoTeste || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'tipoTeste', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Data Planejada</label><input type="date" value={item.dataPlanejada || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'dataPlanejada', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Hora Planejada</label><input type="time" value={item.horaPlanejada || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'horaPlanejada', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Atividade</label><input type="text" value={item.atividade || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'atividade', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Link Teste</label><input type="text" value={item.linkTeste || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'linkTeste', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Predecessora</label><input type="text" value={item.predecessora || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'predecessora', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Responsável</label><input type="text" value={item.responsavel || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'responsavel', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Departamento</label><input type="text" value={item.departamento || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'departamento', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Item Config.</label><input type="text" value={item.itemConfiguracao || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'itemConfiguracao', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Tempo Exec.</label><input type="text" value={item.tempoExecucao || ''} onChange={(e) => handleDynamicTableChange('cadernoTestes', index, 'tempoExecucao', e.target.value)} /></div>
                                             </div>
                                         </div>
-                                    </div>
-                                ))
-                            ) : <p className="empty-state-message">Nenhuma comunicação adicionada.</p>}
-                         </div>
-                         <button type="button" onClick={() => addRow('planoComunicacao', { data: '', hora: '', status: '', meio: 'E-mail', atividade: '', responsavel: '', contatoEscalonamento: '', observacao: '' })} className="submit-btn add-row-btn">+ Adicionar Comunicação</button>
-                    </div>
-                )}
-
-                {currentStep === 6 && (
-                    <div className="step-content">
-                        <h2>{steps[6]}</h2>
-                        <div className="card-like-section">
-                            <div className="form-grid">
-                                <div className="form-field">
-                                    <label htmlFor="riscosGerais_planoRetornoClaro">Plano de implantação claro sobre riscos/gatilhos?</label>
-                                    <div className="radio-group">
-                                        <label className="radio-label"><input type="radio" name="riscosGerais_planoRetornoClaro" value="Sim" checked={formData.riscosGerais.planoRetornoClaro === 'Sim'} onChange={handleChange} /> Sim</label>
-                                        <label className="radio-label"><input type="radio" name="riscosGerais_planoRetornoClaro" value="Não" checked={formData.riscosGerais.planoRetornoClaro === 'Não'} onChange={handleChange} /> Não</label>
-                                    </div>
-                                </div>
-                                <div className="form-field">
-                                    <label htmlFor="riscosGerais_stakeholdersConsultados">Stakeholders consultados sobre riscos?</label>
-                                    <div className="radio-group">
-                                        <label className="radio-label"><input type="radio" name="riscosGerais_stakeholdersConsultados" value="Sim" checked={formData.riscosGerais.stakeholdersConsultados === 'Sim'} onChange={handleChange} /> Sim</label>
-                                        <label className="radio-label"><input type="radio" name="riscosGerais_stakeholdersConsultados" value="Não" checked={formData.riscosGerais.stakeholdersConsultados === 'Não'} onChange={handleChange} /> Não</label>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <h3>Detalhamento dos Riscos</h3>
-                        <div className="implementation-plan-list">
-                             {formData.planoRiscos.length > 0 ? (
-                                formData.planoRiscos.map((item, index) => (
-                                    <div key={item.id || index} className="implementation-card">
-                                        <div className="implementation-card-header">
-                                            <h4>Risco #{index + 1}</h4>
-                                            <button onClick={() => removeRow('planoRiscos', index)} className="action-button remove-row-btn"><TrashIcon /></button>
-                                        </div>
-                                        <div className="form-grid implementation-card-grid">
-                                            <div className="form-field">
-                                                <label>Tipo Risco</label>
-                                                <select value={item.tipoRisco || 'Técnico'} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'tipoRisco', e.target.value)}>
-                                                    <option>Técnico</option><option>Negócio</option><option>Externo</option><option>Organizacional</option>
-                                                </select>
-                                            </div>
-                                            <div className="form-field full-width">
-                                                <label>Risco</label>
-                                                <input type="text" value={item.risco || ''} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'risco', e.target.value)} />
-                                            </div>
-                                            <div className="form-field full-width">
-                                                <label>Estratégia</label>
-                                                <select value={item.estrategia || 'Mitigar'} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'estrategia', e.target.value)}>
-                                                    <option>Mitigar</option><option>Aceitar</option><option>Transferir</option><option>Evitar</option>
-                                                </select>
-                                            </div>
-                                            <div className="form-field full-width">
-                                                <label>Ação</label>
-                                                <textarea value={item.acao || ''} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'acao', e.target.value)} />
-                                            </div>
-                                             <div className="form-field">
-                                                <label>Impacto</label>
-                                                <select value={item.impacto || 'Médio'} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'impacto', e.target.value)}>
-                                                    <option>Baixo</option><option>Médio</option><option>Alto</option><option>Crítico</option>
-                                                </select>
-                                            </div>
-                                            <div className="form-field full-width">
-                                                <label>Mitigação</label>
-                                                <textarea value={item.mitigacao || ''} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'mitigacao', e.target.value)} />
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))
-                            ) : <p className="empty-state-message">Nenhum risco adicionado.</p>}
-                        </div>
-                        <button type="button" onClick={() => addRow('planoRiscos', { tipoRisco: 'Técnico', risco: '', estrategia: 'Mitigar', acao: '', impacto: 'Médio', mitigacao: '' })} className="submit-btn add-row-btn">+ Adicionar Risco</button>
-                    </div>
-                )}
-
-                {currentStep === 7 && (
-                    <div className="step-content">
-                        <h2>{steps[7]}</h2>
-                        {validationErrors.some(e => e.table === 'segurancaAcessos') && (
-                            <p className="table-error-message">
-                                <AlertIcon /> {validationErrors.find(e => e.table === 'segurancaAcessos')?.message}
-                            </p>
-                        )}
-                        <div className="implementation-plan-list">
-                             {formData.segurancaAcessos.perfis.length > 0 ? (
-                                formData.segurancaAcessos.perfis.map((item, index) => (
-                                    <div key={item.id || index} className="implementation-card">
-                                        <div className="implementation-card-header">
-                                            <h4>Perfil #{index + 1}</h4>
-                                            <button onClick={() => removeRow('segurancaAcessos.perfis', index)} className="action-button remove-row-btn"><TrashIcon /></button>
-                                        </div>
-                                        <div className="form-grid implementation-card-grid">
-                                            <div className="form-field">
-                                                <label>Nível de acesso</label>
-                                                <select value={item.nivelAcesso || 'Usuário'} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'nivelAcesso', e.target.value)}>
-                                                    <option>Usuário</option><option>Administrador</option><option>Desenvolvedor</option><option>Somente Leitura</option>
-                                                </select>
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Plataforma</label>
-                                                <input type="text" value={item.plataforma || ''} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'plataforma', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Ambiente</label>
-                                                <select value={item.ambiente || 'Produção'} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'ambiente', e.target.value)}>
-                                                    <option>Produção</option><option>Homologação</option><option>Desenvolvimento</option>
-                                                </select>
-                                            </div>
-                                            <div className="form-field full-width">
-                                                <label>Grupos de acesso</label>
-                                                <input type="text" value={item.gruposAcesso || ''} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'gruposAcesso', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Item de Configuração</label>
-                                                <input type="text" value={item.itemConfiguracao || ''} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'itemConfiguracao', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Área de Negócio</label>
-                                                <input type="text" value={item.areaNegocio || ''} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'areaNegocio', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Usuários</label>
-                                                <input type="text" value={item.usuarios || ''} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'usuarios', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Login de acesso</label>
-                                                <input type="text" value={item.loginAcesso || ''} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'loginAcesso', e.target.value)} />
-                                            </div>
-                                            <div className="form-field full-width">
-                                                <label>Justificativa</label>
-                                                <input type="text" value={item.justificativa || ''} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'justificativa', e.target.value)} />
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))
-                            ) : <p className="empty-state-message">Nenhum perfil de acesso adicionado.</p>}
-                        </div>
-                        <button type="button" onClick={() => addRow('segurancaAcessos.perfis', { nivelAcesso: 'Usuário', plataforma: '', ambiente: 'Produção', gruposAcesso: '', itemConfiguracao: '', areaNegocio: '', usuarios: '', loginAcesso: '', justificativa: '' })} className="submit-btn add-row-btn">+ Adicionar Perfil</button>
-                    </div>
-                )}
-
-                {currentStep === 8 && (
-                    <div className="step-content">
-                        <h2>{steps[8]}</h2>
-                        {validationErrors.some(e => e.table === 'contatos') && (
-                            <p className="table-error-message">
-                                <AlertIcon /> {validationErrors.find(e => e.table === 'contatos')?.message}
-                            </p>
-                        )}
-                        <div className="implementation-plan-list">
-                             {formData.contatos.length > 0 ? (
-                                formData.contatos.map((item, index) => (
-                                    <div key={item.id || index} className="implementation-card">
-                                        <div className="implementation-card-header">
-                                            <h4>Contato #{index + 1}</h4>
-                                            <button onClick={() => removeRow('contatos', index)} className="action-button remove-row-btn"><TrashIcon /></button>
-                                        </div>
-                                        <div className="form-grid implementation-card-grid">
-                                            <div className="form-field">
-                                                <label>Nome</label>
-                                                <input type="text" value={item.nome || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'nome', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Cargo</label>
-                                                <input type="text" value={item.cargo || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'cargo', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>E-mail</label>
-                                                <input type="email" value={item.email || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'email', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Telefones</label>
-                                                <input type="text" value={item.telefones || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'telefones', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Comunicação</label>
-                                                <input type="text" value={item.comunicacao || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'comunicacao', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Local de Atuação</label>
-                                                <input type="text" value={item.localAtuacao || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'localAtuacao', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Líder Imediato</label>
-                                                <input type="text" value={item.liderImediato || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'liderImediato', e.target.value)} />
-                                            </div>
-                                             <div className="form-field">
-                                                <label>E-mail Líder</label>
-                                                <input type="email" value={item.emailLiderImediato || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'emailLiderImediato', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Unidade/Filial</label>
-                                                <input type="text" value={item.unidadeFilial || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'unidadeFilial', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Área</label>
-                                                <input type="text" value={item.area || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'area', e.target.value)} />
-                                            </div>
-                                            <div className="form-field">
-                                                <label>Gestor da Área</label>
-                                                <input type="text" value={item.gestorArea || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'gestorArea', e.target.value)} />
-                                            </div>
-                                            <div className="form-field full-width">
-                                                <label>Comunicação Envolvida</label>
-                                                <input type="text" value={item.comunicacaoEnvolvida || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'comunicacaoEnvolvida', e.target.value)} />
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))
-                            ) : <p className="empty-state-message">Nenhum contato adicionado.</p>}
-                        </div>
-                        <button type="button" onClick={() => addRow('contatos', { nome: '', cargo: '', email: '', telefones: '', comunicacao: '', localAtuacao: '', liderImediato: '', emailLiderImediato: '', unidadeFilial: '', area: '', gestorArea: '', comunicacaoEnvolvida: '' })} className="submit-btn add-row-btn">+ Adicionar Contato</button>
-                    </div>
-                )}
-
-                {currentStep === 9 && (
-                    <div className="step-content">
-                         <h2>{steps[9]}</h2>
-                         <div className="accordion">
-                             {Object.entries(groupedChecklist).map(([scope, items]) => 
-                                 renderChecklistGroup(items, 'checklist')
-                             )}
-                         </div>
-                    </div>
-                )}
-
-                {currentStep === 10 && formData.informacoesGerais.referenteSAP === 'Sim' && (
-                    <div className="step-content">
-                        <h2>{steps[10]}</h2>
-                         <div className="accordion">
-                             {Object.entries(groupedChecklistSAP).map(([scope, items]) => 
-                                 renderChecklistGroup(items, 'checklistSAP')
-                             )}
-                         </div>
-                    </div>
-                )}
-
-                {currentStep === 11 && (
-                    <div className="step-content">
-                        <h2>{steps[11]}</h2>
-                        <div className="card-like-section">
-                            <label className="file-input-label">
-                                <input 
-                                    type="file" 
-                                    multiple 
-                                    onChange={handleFileChange} 
-                                    style={{ display: 'none' }} 
-                                    disabled={!canUpload}
-                                />
-                                {canUpload ? (
-                                    <>
-                                        <span style={{fontSize: '2rem', display: 'block', marginBottom: '0.5rem'}}>☁️</span>
-                                        <span>Clique para selecionar arquivos ou arraste-os aqui</span>
-                                        <span style={{display: 'block', fontSize: '0.8rem', color: '#666', marginTop: '0.5rem'}}>Max: 10 arquivos</span>
-                                    </>
-                                ) : (
-                                    <span>Limite de anexos atingido.</span>
-                                )}
-                            </label>
-                            
-                            {formData.anexos.length > 0 && (
-                                <ul className="file-list">
-                                    {formData.anexos.map((file, index) => (
-                                        <li key={index}>
-                                            <span>{file.name} ({(file.size / 1024).toFixed(2)} KB)</span>
-                                            <button type="button" onClick={() => removeAnexo(index)} className="action-button remove-row-btn">&times;</button>
-                                        </li>
                                     ))}
-                                </ul>
-                            )}
-                        </div>
-                    </div>
-                )}
+                                </div>
+                                <button type="button" onClick={() => addRow('cadernoTestes', {})} className="submit-btn add-row-btn">+ Adicionar Teste</button>
+                             </>
+                         )}
+                         {currentStep === 4 && (
+                             <>
+                                <div className="implementation-plan-list">
+                                    {formData.planoRetorno.map((item, index) => (
+                                        <div key={index} className="implementation-card">
+                                            <div className="implementation-card-header"><h4>Atividade #{index+1}</h4><button type="button" onClick={() => removeRow('planoRetorno', index)} className="action-button remove-row-btn"><TrashIcon /></button></div>
+                                            <div className="form-grid implementation-card-grid">
+                                                 <div className="form-field"><label>Data Planejada</label><input type="date" value={item.dataPlanejada || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'dataPlanejada', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Hora Planejada</label><input type="time" value={item.horaPlanejada || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'horaPlanejada', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Status</label><input type="text" value={item.status || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'status', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Data Realizada</label><input type="date" value={item.dataRealizada || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'dataRealizada', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Hora Realizada</label><input type="time" value={item.horaRealizada || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'horaRealizada', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Tipo</label><input type="text" value={item.tipo || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'tipo', e.target.value)} /></div>
+                                                 <div className="form-field full-width"><label>Descrição</label><input type="text" value={item.descricao || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'descricao', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Predecessora</label><input type="text" value={item.predecessora || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'predecessora', e.target.value)} /></div>
+                                                 <div className="form-field"><label>Responsável</label><input type="text" value={item.responsavel || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'responsavel', e.target.value)} /></div>
+                                                 <div className="form-field full-width"><label>Observação</label><textarea value={item.observacao || ''} onChange={(e) => handleDynamicTableChange('planoRetorno', index, 'observacao', e.target.value)} /></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button type="button" onClick={() => addRow('planoRetorno', {})} className="submit-btn add-row-btn">+ Adicionar Atividade</button>
+                             </>
+                         )}
+                         {currentStep === 5 && (
+                             <>
+                                <div className="card-like-section">
+                                    <h3>Checklist de Comunicação</h3>
+                                    <div className="form-grid">
+                                        <div className="form-field"><label>Partes envolvidas validaram o plano?</label><select name="comunicacaoChecklist_partesEnvolvidasValidaram" value={formData.comunicacaoChecklist.partesEnvolvidasValidaram} onChange={handleChange}><option value="">Selecione...</option><option>Sim</option><option>Não</option></select></div>
+                                        <div className="form-field"><label>Processo de acompanhamento comunicado?</label><select name="comunicacaoChecklist_processoAcompanhamentoComunicado" value={formData.comunicacaoChecklist.processoAcompanhamentoComunicado} onChange={handleChange}><option value="">Selecione...</option><option>Sim</option><option>Não</option></select></div>
+                                        <div className="form-field"><label>Comunicação de retorno contemplada?</label><select name="comunicacaoChecklist_comunicacaoEventoRetorno" value={formData.comunicacaoChecklist.comunicacaoEventoRetorno} onChange={handleChange}><option value="">Selecione...</option><option>Sim</option><option>Não</option></select></div>
+                                        <div className="form-field"><label>Passo a passo para aplicação existe?</label><select name="comunicacaoChecklist_passoAPassoAplicacao" value={formData.comunicacaoChecklist.passoAPassoAplicacao} onChange={handleChange}><option value="">Selecione...</option><option>Sim</option><option>Não</option></select></div>
+                                        <div className="form-field"><label>Tabela de contatos preenchida?</label><select name="comunicacaoChecklist_tabelaContatosPreenchida" value={formData.comunicacaoChecklist.tabelaContatosPreenchida} onChange={handleChange}><option value="">Selecione...</option><option>Sim</option><option>Não</option></select></div>
+                                        <div className="form-field"><label>Pontos focais informados?</label><select name="comunicacaoChecklist_pontosFocaisInformados" value={formData.comunicacaoChecklist.pontosFocaisInformados} onChange={handleChange}><option value="">Selecione...</option><option>Sim</option><option>Não</option></select></div>
+                                    </div>
+                                </div>
+                                <h3>Detalhamento da Comunicação</h3>
+                                <div className="implementation-plan-list">
+                                    {formData.planoComunicacao.map((item, index) => (
+                                        <div key={index} className="implementation-card">
+                                            <div className="implementation-card-header"><h4>Comunicação #{index+1}</h4><button type="button" onClick={() => removeRow('planoComunicacao', index)} className="action-button remove-row-btn"><TrashIcon /></button></div>
+                                            <div className="form-grid implementation-card-grid">
+                                                <div className="form-field"><label>Data</label><input type="date" value={item.data || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'data', e.target.value)} /></div>
+                                                <div className="form-field"><label>Hora</label><input type="time" value={item.hora || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'hora', e.target.value)} /></div>
+                                                <div className="form-field"><label>Status</label><input type="text" value={item.status || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'status', e.target.value)} /></div>
+                                                <div className="form-field"><label>Meio</label><input type="text" value={item.meio || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'meio', e.target.value)} /></div>
+                                                <div className="form-field"><label>Atividade/Público</label><input type="text" value={item.atividade || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'atividade', e.target.value)} /></div>
+                                                <div className="form-field"><label>Responsável</label><input type="text" value={item.responsavel || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'responsavel', e.target.value)} /></div>
+                                                <div className="form-field"><label>Contato Escal.</label><input type="text" value={item.contatoEscalonamento || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'contatoEscalonamento', e.target.value)} /></div>
+                                                <div className="form-field full-width"><label>Observação</label><textarea value={item.observacao || ''} onChange={(e) => handleDynamicTableChange('planoComunicacao', index, 'observacao', e.target.value)} /></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button type="button" onClick={() => addRow('planoComunicacao', {})} className="submit-btn add-row-btn">+ Adicionar Comunicação</button>
+                             </>
+                         )}
+                         {currentStep === 6 && (
+                             <>
+                                <div className="card-like-section">
+                                    <h3>Riscos Gerais</h3>
+                                    <div className="form-grid">
+                                        <div className="form-field full-width"><label>O plano de implantação deixa claro onde existem riscos e gatilhos para execução do plano de retorno?</label><select name="riscosGerais_planoRetornoClaro" value={formData.riscosGerais.planoRetornoClaro} onChange={handleChange}><option value="">Selecione...</option><option>Sim</option><option>Não</option></select></div>
+                                        <div className="form-field full-width"><label>Todos os stakeholders foram consultados sobre riscos?</label><select name="riscosGerais_stakeholdersConsultados" value={formData.riscosGerais.stakeholdersConsultados} onChange={handleChange}><option value="">Selecione...</option><option>Sim</option><option>Não</option></select></div>
+                                    </div>
+                                </div>
+                                <h3>Detalhamento dos Riscos</h3>
+                                <div className="implementation-plan-list">
+                                    {formData.planoRiscos.map((item, index) => (
+                                        <div key={index} className="implementation-card">
+                                            <div className="implementation-card-header"><h4>Risco #{index+1}</h4><button type="button" onClick={() => removeRow('planoRiscos', index)} className="action-button remove-row-btn"><TrashIcon /></button></div>
+                                            <div className="form-grid implementation-card-grid">
+                                                <div className="form-field"><label>Tipo Risco</label><input type="text" value={item.tipoRisco || ''} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'tipoRisco', e.target.value)} /></div>
+                                                <div className="form-field full-width"><label>Risco</label><input type="text" value={item.risco || ''} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'risco', e.target.value)} /></div>
+                                                <div className="form-field full-width"><label>Estratégia</label><input type="text" value={item.estrategia || ''} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'estrategia', e.target.value)} /></div>
+                                                <div className="form-field full-width"><label>Ação</label><input type="text" value={item.acao || ''} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'acao', e.target.value)} /></div>
+                                                <div className="form-field"><label>Impacto</label><select value={item.impacto || ''} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'impacto', e.target.value)}><option value="">Selecione...</option><option>Baixo</option><option>Médio</option><option>Alto</option></select></div>
+                                                <div className="form-field full-width"><label>Mitigação</label><textarea value={item.mitigacao || ''} onChange={(e) => handleDynamicTableChange('planoRiscos', index, 'mitigacao', e.target.value)} /></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button type="button" onClick={() => addRow('planoRiscos', {})} className="submit-btn add-row-btn">+ Adicionar Risco</button>
+                             </>
+                         )}
+                         {currentStep === 7 && (
+                             <>
+                                <div className="implementation-plan-list">
+                                    {formData.segurancaAcessos.perfis.map((item, index) => (
+                                        <div key={item.id || index} className="implementation-card">
+                                            <div className="implementation-card-header"><h4>Perfil #{index+1}</h4><button type="button" onClick={() => removeRow('segurancaAcessos', index)} className="action-button remove-row-btn"><TrashIcon /></button></div>
+                                            <div className="form-grid implementation-card-grid">
+                                                <div className="form-field"><label>Nível Acesso</label><input type="text" value={item.nivelAcesso || ''} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'nivelAcesso', e.target.value)} /></div>
+                                                <div className="form-field"><label>Plataforma</label><input type="text" value={item.plataforma || ''} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'plataforma', e.target.value)} /></div>
+                                                <div className="form-field"><label>Ambiente</label><input type="text" value={item.ambiente || ''} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'ambiente', e.target.value)} /></div>
+                                                <div className="form-field"><label>Grupos Acesso</label><input type="text" value={item.gruposAcesso || ''} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'gruposAcesso', e.target.value)} /></div>
+                                                <div className="form-field"><label>Item Config.</label><input type="text" value={item.itemConfiguracao || ''} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'itemConfiguracao', e.target.value)} /></div>
+                                                <div className="form-field"><label>Área Negócio</label><input type="text" value={item.areaNegocio || ''} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'areaNegocio', e.target.value)} /></div>
+                                                <div className="form-field"><label>Usuários</label><input type="text" value={item.usuarios || ''} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'usuarios', e.target.value)} /></div>
+                                                <div className="form-field"><label>Login Acesso</label><input type="text" value={item.loginAcesso || ''} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'loginAcesso', e.target.value)} /></div>
+                                                <div className="form-field full-width"><label>Justificativa</label><textarea value={item.justificativa || ''} onChange={(e) => handleDynamicTableChange('segurancaAcessos.perfis', index, 'justificativa', e.target.value)} /></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button type="button" onClick={() => addRow('segurancaAcessos', {})} className="submit-btn add-row-btn">+ Adicionar Perfil</button>
+                             </>
+                         )}
+                         {currentStep === 8 && (
+                             <>
+                                <div className="implementation-plan-list">
+                                    {formData.contatos.map((item, index) => (
+                                        <div key={index} className="implementation-card">
+                                            <div className="implementation-card-header"><h4>Contato #{index+1}</h4><button type="button" onClick={() => removeRow('contatos', index)} className="action-button remove-row-btn"><TrashIcon /></button></div>
+                                            <div className="form-grid implementation-card-grid">
+                                                <div className="form-field"><label>Nome</label><input type="text" value={item.nome || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'nome', e.target.value)} /></div>
+                                                <div className="form-field"><label>Cargo</label><input type="text" value={item.cargo || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'cargo', e.target.value)} /></div>
+                                                <div className="form-field"><label>E-mail</label><input type="email" value={item.email || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'email', e.target.value)} /></div>
+                                                <div className="form-field"><label>Telefones</label><input type="text" value={item.telefones || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'telefones', e.target.value)} /></div>
+                                                <div className="form-field"><label>Comunicação</label><input type="text" value={item.comunicacao || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'comunicacao', e.target.value)} /></div>
+                                                <div className="form-field"><label>Local Atuação</label><input type="text" value={item.localAtuacao || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'localAtuacao', e.target.value)} /></div>
+                                                <div className="form-field"><label>Líder Imediato</label><input type="text" value={item.liderImediato || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'liderImediato', e.target.value)} /></div>
+                                                <div className="form-field"><label>E-mail Líder</label><input type="email" value={item.emailLiderImediato || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'emailLiderImediato', e.target.value)} /></div>
+                                                <div className="form-field"><label>Unidade/Filial</label><input type="text" value={item.unidadeFilial || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'unidadeFilial', e.target.value)} /></div>
+                                                <div className="form-field"><label>Área</label><input type="text" value={item.area || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'area', e.target.value)} /></div>
+                                                <div className="form-field"><label>Gestor Área</label><input type="text" value={item.gestorArea || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'gestorArea', e.target.value)} /></div>
+                                                <div className="form-field"><label>Comun. Envolvida</label><input type="text" value={item.comunicacaoEnvolvida || ''} onChange={(e) => handleDynamicTableChange('contatos', index, 'comunicacaoEnvolvida', e.target.value)} /></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button type="button" onClick={() => addRow('contatos', {})} className="submit-btn add-row-btn">+ Adicionar Contato</button>
+                             </>
+                         )}
+                         {currentStep === 9 && (
+                             <div className="checklist-container">
+                                {Object.entries(groupedChecklist).map(([scope, group]) => renderChecklistGroup(group, 'checklist'))}
+                             </div>
+                         )}
+                         {currentStep === 10 && formData.informacoesGerais.referenteSAP === 'Sim' && (
+                            <div className="checklist-container">
+                                {Object.entries(groupedChecklistSAP).map(([scope, group]) => renderChecklistGroup(group, 'checklistSAP'))}
+                            </div>
+                         )}
+                         {currentStep === 11 && (
+                            <div className="card-like-section">
+                                <label className="file-input-label">
+                                    <input type="file" multiple onChange={handleFileChange} style={{ display: 'none' }} disabled={!canUpload} />
+                                    {canUpload ? <span>☁️ Clique para selecionar arquivos</span> : <span>Limite atingido</span>}
+                                </label>
+                                {formData.anexos.length > 0 && (
+                                    <ul className="file-list">
+                                        {formData.anexos.map((file, index) => (
+                                            <li key={index}><span>{file.name}</span><button type="button" onClick={() => removeAnexo(index)} className="action-button remove-row-btn">&times;</button></li>
+                                        ))}
+                                    </ul>
+                                )}
+                            </div>
+                         )}
+                     </div>
+                 )}
 
                 {currentStep === steps.length - 1 && submittedRequestId && (
                     <div className="step-content success-message">
@@ -2906,12 +3049,28 @@ const NewRequestPage = ({ addRequest, currentUser, onSaveDraft, onAutoSaveDraft 
                             <p style={{fontSize: '1.2rem', margin: '1rem 0'}}>
                                 O ID da sua requisição é: <strong>{submittedRequestId}</strong>
                             </p>
-                            <p>Para finalizar o processo, clique no botão abaixo para gerar o e-mail de solicitação para o CAB.</p>
                             
-                            <div style={{margin: '2rem 0', display: 'flex', justifyContent: 'center', gap: '1rem'}}>
-                                <a href={mailtoLink} className="submit-btn" style={{textDecoration: 'none', display: 'inline-block'}}>
-                                    📧 Enviar E-mail para o CAB
-                                </a>
+                            <div style={{backgroundColor: '#e3f2fd', padding: '1.5rem', borderRadius: '8px', margin: '2rem 0', border: '1px solid #b3e5fc'}}>
+                                <h3 style={{color: '#0d47a1', marginBottom: '1rem', fontSize: '1.1rem'}}>📢 Próximos Passos Obrigatórios</h3>
+                                <p style={{marginBottom: '1rem'}}>
+                                    O envio automático de anexos não é suportado pelo seu cliente de e-mail. <br/>
+                                    <strong>Você deve baixar o PDF e anexá-lo manualmente.</strong>
+                                </p>
+                                
+                                <div style={{display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center'}}>
+                                    <button 
+                                        type="button" 
+                                        className="submit-btn" 
+                                        style={{backgroundColor: '#0d47a1', display: 'flex', alignItems: 'center', gap: '0.5rem'}}
+                                        onClick={() => generateAndSavePdf(formData, submittedRequestId)}
+                                    >
+                                        <DownloadIcon /> 1. Baixar PDF da Requisição
+                                    </button>
+                                    
+                                    <a href={mailtoLink} className="submit-btn" style={{textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                                        📧 2. Enviar E-mail para o CAB (Anexe o PDF!)
+                                    </a>
+                                </div>
                             </div>
                             
                             <div style={{marginTop: '2rem', borderTop: '1px solid var(--sipal-gray)', paddingTop: '1rem'}}>
@@ -2954,6 +3113,75 @@ const NewRequestPage = ({ addRequest, currentUser, onSaveDraft, onAutoSaveDraft 
                     </div>
                 )}
             </form>
+
+            {/* Calendar Modal for Picker */}
+            <Modal
+                isOpen={isCalendarModalOpen}
+                onClose={() => { setIsCalendarModalOpen(false); setSelectedDateForTime(null); }}
+                title="Agenda CAB - Selecione um horário"
+                footer={<button onClick={() => { setIsCalendarModalOpen(false); setSelectedDateForTime(null); }} className="nav-button">Cancelar</button>}
+            >
+                {selectedDateForTime ? (
+                    <div className="day-editor">
+                        <h3>Horários disponíveis em {new Date(selectedDateForTime).toLocaleDateString('pt-BR')}</h3>
+                        <p style={{marginBottom: '1rem', color: '#666'}}>Selecione um horário de início para sua reunião:</p>
+                        <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: '10px'}}>
+                            {getAvailableSlotsForDate(selectedDateForTime).map(slot => (
+                                <button
+                                    key={slot}
+                                    type="button"
+                                    className="nav-button secondary"
+                                    style={{fontSize: '0.8rem', padding: '0.5rem'}}
+                                    onClick={() => {
+                                        const finalStr = `${new Date(selectedDateForTime).toLocaleDateString('pt-BR')} ${slot}`;
+                                        handleChange({ target: { name: 'informacoesGerais_dataAgendaCAB', value: finalStr } });
+                                        setIsCalendarModalOpen(false);
+                                        setSelectedDateForTime(null);
+                                    }}
+                                >
+                                    {slot}
+                                </button>
+                            ))}
+                        </div>
+                        {getAvailableSlotsForDate(selectedDateForTime).length === 0 && (
+                            <div style={{gridColumn: '1/-1', textAlign: 'center', padding: '2rem'}}>
+                                <p style={{color: '#dc3545', fontWeight: '600'}}>Nenhum horário disponível.</p>
+                                <p style={{fontSize: '0.9rem', color: '#666'}}>
+                                    {formData.informacoesGerais.classificacao === 'Emergencial' 
+                                        ? 'Tente outra data.' 
+                                        : 'A Governança ainda não liberou horários para este dia.'}
+                                </p>
+                            </div>
+                        )}
+                        <button 
+                            type="button" 
+                            className="nav-button secondary" 
+                            style={{marginTop: '1rem'}} 
+                            onClick={() => setSelectedDateForTime(null)}
+                        >
+                            Voltar para Calendário
+                        </button>
+                    </div>
+                ) : (
+                    <div className="calendar-container">
+                        {/* ... calendar grid ... */}
+                        <div className="calendar-controls">
+                            <button onClick={() => changeCalMonth(-1)} className="nav-button secondary">&lt;</button>
+                            <h3>{["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"][calMonth]} {calYear}</h3>
+                            <button onClick={() => changeCalMonth(1)} className="nav-button secondary">&gt;</button>
+                        </div>
+                        <div className="calendar-legend">
+                            <div className="legend-item"><span className="dot meeting"></span> Reunião CAB (Disponível)</div>
+                        </div>
+                        <div className="calendar-weekdays">
+                            <div>Dom</div><div>Seg</div><div>Ter</div><div>Qua</div><div>Qui</div><div>Sex</div><div>Sáb</div>
+                        </div>
+                        <div className="calendar-grid">
+                            {renderCalendarPicker()}
+                        </div>
+                    </div>
+                )}
+            </Modal>
         </div>
     );
 };
@@ -2997,9 +3225,23 @@ const App = () => {
     }, []);
 
     const handleLogin = (email, password) => {
-        // Simple mock login
+        // First check localStorage for registered users
+        const storedUsers = localStorage.getItem('cab-users');
+        if (storedUsers) {
+            const users = JSON.parse(storedUsers);
+            const foundUser = users.find(u => u.email === email && u.password === password);
+            if (foundUser) {
+                const userData = { name: foundUser.name, email: foundUser.email };
+                setUser(userData);
+                sessionStorage.setItem('cab-user', JSON.stringify(userData));
+                return true;
+            }
+        }
+        
+        // Fallback for testing/legacy
         if (password === '123456') {
-            const userData = { name: 'Usuário Teste', email };
+            const nameFromEmail = email.split('@')[0].replace('.', ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const userData = { name: nameFromEmail, email };
             setUser(userData);
             sessionStorage.setItem('cab-user', JSON.stringify(userData));
             return true;
@@ -3008,10 +3250,33 @@ const App = () => {
     };
     
     const handleRegister = (name, email, password) => {
+        const newUser = { name, email, password };
+        const storedUsers = localStorage.getItem('cab-users');
+        const users = storedUsers ? JSON.parse(storedUsers) : [];
+        
+        if (users.some(u => u.email === email)) {
+            return false;
+        }
+        
+        users.push(newUser);
+        localStorage.setItem('cab-users', JSON.stringify(users));
+        
         const userData = { name, email };
         setUser(userData);
         sessionStorage.setItem('cab-user', JSON.stringify(userData));
         return true;
+    };
+
+    const handleRecover = (email) => {
+        const storedUsers = localStorage.getItem('cab-users');
+        if (storedUsers) {
+            const users = JSON.parse(storedUsers);
+            const foundUser = users.find(u => u.email === email);
+            if (foundUser) {
+                return foundUser.password;
+            }
+        }
+        return null;
     };
 
     const handleLogout = () => {
@@ -3109,6 +3374,7 @@ const App = () => {
         
         // Reset specific fields for a new copy (Dates)
         copiedData.informacoesGerais.dataMudanca = '';
+        copiedData.informacoesGerais.dataAgendaCAB = '';
         copiedData.informacoesGerais.indisponibilidadeInicio = '';
         copiedData.informacoesGerais.indisponibilidadeFim = '';
         
@@ -3134,8 +3400,6 @@ const App = () => {
         
         localStorage.setItem(WIZARD_STORAGE_KEY, JSON.stringify({ formData: copiedData, draftId: null }));
         setActiveTab('newRequest');
-        // Refresh not needed if component remounts on tab switch, but safer if activeTab doesn't change
-        // Since we are likely already on 'myRequests', switching to 'newRequest' is a change.
     };
 
     const handleAdminNewRequest = () => {
@@ -3145,7 +3409,7 @@ const App = () => {
     };
 
     if (!user) {
-        return <AuthPage onLogin={handleLogin} onRegister={handleRegister} users={[]} />;
+        return <AuthPage onLogin={handleLogin} onRegister={handleRegister} onRecover={handleRecover} users={[]} />;
     }
 
     return (
@@ -3177,7 +3441,15 @@ const App = () => {
                     />
                 )}
                 {activeTab === 'analysis' && (
-                    <AnalysisPage requests={requests} onAdminNewRequest={handleAdminNewRequest} />
+                    <AnalysisPage 
+                        requests={requests} 
+                        kanbanStatuses={kanbanStatuses} 
+                        onAdminNewRequest={handleAdminNewRequest} 
+                        onNavigateToDashboard={() => setActiveTab('dashboard')}
+                    />
+                )}
+                {activeTab === 'dashboard' && (
+                    <DashboardPage onBack={() => setActiveTab('analysis')} />
                 )}
             </main>
         </>
